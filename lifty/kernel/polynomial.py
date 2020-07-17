@@ -180,6 +180,32 @@ class TopPoly:
                 continue
         return m
 
+## Let p(z) be a complex polynomial. Then by the mean value thm, Re( (p(B)-p(A))/(B-A) ) <= max(Re(p'(z))),
+## and Im( (p(B)-p(A))/(B-A) ) <= max(Im(p'(z))), where the maximum is taken over the segment 
+## from A to B. This implies that | ((p(B) - p(A))/(B - A) | <= 2*max(|p'(z)|).
+
+## Now let a,b be points in the complex plane, and let A and B be lifts of a and b by p. 
+## Denote by a-->b the line segment from a to be, and by A-->B the segment from A to B. We
+## want to check that some lift of a-->b is isotopic to A-->B. Or, equivalently, that
+## p(A-->B) is isotopic to a-->b. If this fails, then p(A-->B) must be an arc that has 
+## length at least twice d, where d is the distance from a-->b to {postcritical set}\{a,b}.
+## It follows that there is some point C on A-->B such that the length of a-->p(C) => d,
+## i.e., |P(A)-P(C)| >= d. Thus we get |B-A| >= |C-A| >= d/(max(|p'(z)|)), where the maximum is taken
+## over the segment from A to B. The quantity d is computed by the above function, dist_to_pcs().
+
+## Let p'(z) = a_n*z^n+a_{n-1}*z^{n-1}+ ... + a_1*z + a_0. Then 
+## max(|p'(z)|) <= max( |a_n*z^n| + |a_{n-1}*z^{n-1}| + ... + |a_1*z| + |a_0| ). If we maximize the latter
+## quantity over the disk whose diameter is the segment A-->B, then the inequality still holds, and the 
+## max is attained on the boundary of the disk. Such points are of the form z_0 + r_0*exp(i*theta), where 
+## z_0 is the center of the disk and r_0 is the radius. Since |exp(i*theta)|=1, we can apply the binomial
+## theorem to expand each term, then use the triangle inequality again to something that does not depend
+## on theta, and his therefore constant. This is what the below function computes.
+
+## Note that we do all of the above to avoid having to maximize a polynomial, at the cost of most likely 
+## getting a worse bound on | ((p(B) - p(A))/(B - A) | than could have been obtained otherwise. My guess 
+## is that this is worth it, but maybe there are improvements to be made here.
+
+
 
     def max_deriv(self,segment):
         """If Q(x) = a_n*z^n+a_{n-1}*z^{n-1}+ ... + a_1*z + a_0 is the derivative of self,
