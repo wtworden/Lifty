@@ -93,6 +93,20 @@ class Triangulation:
         else:
             return None
 
+#    def add_edges_to_infinity(self):
+#        if not self.is_lifted_tri():
+#            for v in self.vertices():
+#                v_edges = v.incident_edges()
+#                l = len(v_edges)
+#                for i in range(l):
+#                    e1 = self.edge(v_edges[i])
+#                    e2 = self.edge(v_edges[(i+1)%l])
+#                    angle = 
+                    
+
+    def combinatorialized(self):
+        pass
+
     def is_embedded(self):
         E = self._edges
         for i in range(self.num_edges()):
