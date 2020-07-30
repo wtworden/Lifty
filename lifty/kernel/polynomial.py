@@ -446,7 +446,6 @@ class TopPoly:
 
             is_embedded, bad_segs = T.is_embedded()
             while not is_embedded:
-                return T.plot()
                 for bad_seg in bad_segs:
                     edge_index = bad_seg[0]
                     seg_index = bad_seg[1]
