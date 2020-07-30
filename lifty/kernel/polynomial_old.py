@@ -246,9 +246,6 @@ class Polynomial:
         return all_roots
 
 
-    def postcrit_set(self):
-        
-
 
 class IntervalError(Exception):
     def __init__(self,msg):

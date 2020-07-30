@@ -4,7 +4,7 @@ import random
 import itertools as it
 import sys
 
-from lifty.kernel.triangulation import Segment, Edge, MarkedEdge, Vertex, Triangulation, LiftedTriangulation
+from lifty.kernel.triangulation import Point, Segment, Edge, MarkedEdge, Vertex, Triangulation, LiftedTriangulation
 from lifty.constants import RABBIT, CORABBIT, AIRPLANE
 
 COLORS = ['blue','red','green','cyan','black','grey','pink','purple','orange','brown','limegreen','olive']
@@ -21,6 +21,8 @@ class TopPoly:
         """
         self._coefficients = coefficients
 
+        self._max_precision = 1000
+
         self.degree = len(self._coefficients)-1
         self._roots = None
         self._critical_pts = None
@@ -30,13 +32,19 @@ class TopPoly:
         self._lifted_tri = None
         self._derivative = None
 
+    def max_precision(self):
+        return self._max_precision
+
+    def set_max_precision(self, bits):
+        self._max_precision = bits
+
     def coefficients(self):
         return self._coefficients
     
     def coeff(self, k):
         return self._coefficients[self.degree-k]
 
-    def evaluate(self,z): # z should be an algebraic integer, if we want to return an algebraic integer
+    def evaluate(self,z):
         result = 0
         for i in range(self.degree+1):
             result += self.coeff(i)*(z**i)
@@ -88,7 +96,7 @@ class TopPoly:
         if self._critical_pts == None:
             Q = self.derivative()
             Qroots = Q.roots()
-            self._critical_pts = [Qroots[i][0] for i in range(len(Qroots))]
+            self._critical_pts = [Point(Qroots[i][0]) for i in range(len(Qroots))]
         return self._critical_pts
 
     def postcritical_set(self, max_iterations=20):
@@ -105,7 +113,7 @@ class TopPoly:
         """
         if self._postcritical_set == None:
             M = max_iterations
-            C = self.critical_pts()
+            C = [c.alg() for c in self.critical_pts()]
             PCS = dict()
             for c in C:
                 confirmed_finite = False
@@ -122,20 +130,67 @@ class TopPoly:
                         PCS[c].reverse()  ## ensures that the critical point, if in PCS[c], is the first in the list
                         break
                 if confirmed_finite == False:
-                    return 'Error: either this polynomial is not post-critally finite, or max_iterations needs to be increased.'
+                    raise IterationError('either this polynomial is not post-critally finite, or max_iterations needs to be increased.')
                 else:
                     continue
-            self._postcritical_set = list(set([pcp for c in C for pcp in PCS[c]]))
+            postcritical = list(set([pcp for c in C for pcp in PCS[c]]))
+            pcs = [Point(p) for p in postcritical]
+
+
+            # check that the intervals for points in the postcritical set are all disjoint. If not, increase precision.
+            make_intervals_disjoint(pcs, self.max_precision())
+            self._postcritical_set = pcs
         return self._postcritical_set
 
-    def lifts(self,z):
-        """Return all lifts of the point z, which must be an algebraic number.
+
+    def pc_triangulation(self):
+        """Return a triangulation whose vertices are the postcritical set. This will always be a 
+            linear triangulation (each edge is a single line segment). Note that at this point 
+            we don't include edges with endpoints at infinity. Results are cached.
         """
-        c = self.coeff(0)-z
+        if self._pc_triangulation == None:
+            pcs = self.postcritical_set()
+            L = len(pcs)
+            edge_list = []
+            for i in range(L-1):
+                for j in range(i+1,L):
+                    a,b = pcs[i],pcs[j]
+                    e = Edge([a,b], self)
+                    s = e.segment(0)
+                    if e not in edge_list:
+                        to_trash = False
+                        for edge in edge_list:
+                            if s.transverse_to(edge.segment(0)):
+                                to_trash = True
+                                break
+                        if not to_trash:
+                            for k in range(L):
+                                if k != i and k != j:
+                                    if s.on_seg(pcs[k]):
+                                        to_trash = True
+                                        break
+                        if not to_trash:
+                            edge_list.append(e)
+
+            for i in range(len(edge_list)):
+                edge_list[i]._index = i
+
+            T = Triangulation(edge_list, self)
+            self._pc_triangulation = T
+
+        return self._pc_triangulation
+
+
+
+
+    def lifts(self,point):
+        """Return all lifts of point, which must be a Point.
+        """
+        c = self.coeff(0)-point.alg()
         coeffs = self.coefficients()[:-1]+[c]
         Q = TopPoly(coeffs)
         Qroots = Q.roots()
-        lifts = set([Qroots[i][0] for i in range(len(Qroots))])
+        lifts = [Point(Qroots[i][0]) for i in range(len(Qroots))]
         return lifts
 
     def lifted_pcs(self):
@@ -143,23 +198,27 @@ class TopPoly:
         """
         if self._lifted_pcs == None:
             lifted_pcs = []
-            for z in self.postcritical_set():
-                lifts = self.lifts(z)
+            for p in self.postcritical_set():
+                lifts = self.lifts(p)
                 for l in lifts:
                     lifted_pcs.append(l)
-            self._lifted_pcs = lifted_pcs
+            lpcs = lifted_pcs
+            make_intervals_disjoint(lpcs, self.max_precision())
+
+            self._lifted_pcs = lpcs
         return self._lifted_pcs
+
 
     def dist_to_pcs(self,segment):
         """Returns minimal distance between the given edge and points of the 
             postcritical set which are not vertices of the edge. This should probably
             be moved out of the TopPoly class eventually.
         """
-        a,b = CIF(segment[0]), CIF(segment[1])
+        a,b = segment[0].cif(), segment[1].cif()
         pcs = [p for p in self.postcritical_set() if p not in segment]
         m = Infinity
         for i in range(len(pcs)):
-            p = CIF(pcs[i])
+            p = pcs[i].cif()
             x_0,y_0 = p.real(), p.imag()
             b_re, b_im = b.real(), b.imag()
             a_re, a_im = a.real(), a.imag()
@@ -194,12 +253,9 @@ class TopPoly:
 ## over the segment from A to B. The quantity d is computed by the above function, dist_to_pcs().
 
 ## Let p'(z) = a_n*z^n+a_{n-1}*z^{n-1}+ ... + a_1*z + a_0. Then 
-## max(|p'(z)|) <= max( |a_n*z^n| + |a_{n-1}*z^{n-1}| + ... + |a_1*z| + |a_0| ). If we maximize the latter
-## quantity over the disk whose diameter is the segment A-->B, then the inequality still holds, and the 
-## max is attained on the boundary of the disk. Such points are of the form z_0 + r_0*exp(i*theta), where 
-## z_0 is the center of the disk and r_0 is the radius. Since |exp(i*theta)|=1, we can apply the binomial
-## theorem to expand each term, then use the triangle inequality again to something that does not depend
-## on theta, and his therefore constant. This is what the below function computes.
+## max(|p'(z)|) <= max( |a_n*z^n| + |a_{n-1}*z^{n-1}| + ... + |a_1*z| + |a_0| ). The right hand side
+## is maximized at the point on A-->B with largest modulus, which must be one of the endpoints since it 
+## is a line segment. 
 
 ## Note that we do all of the above to avoid having to maximize a polynomial, at the cost of most likely 
 ## getting a worse bound on | ((p(B) - p(A))/(B - A) | than could have been obtained otherwise. My guess 
@@ -210,24 +266,17 @@ class TopPoly:
     def max_deriv(self,segment):
         """If Q(x) = a_n*z^n+a_{n-1}*z^{n-1}+ ... + a_1*z + a_0 is the derivative of self,
             then return the maximum of |a_n*z^n|+|a_{n-1}*z^{n-1}|+ ... + |a_1*z| + |a_0|
-            on the disk whose diameter is segment. We really only care about the max of |Q(x)| on 
-            segment, but it is easier computationally to take the max over a disk, since
-            by the maximum modulus thm we know max(|Q(x)|) is attained on the boundary of the disk.
-            Since max(|Q(x)|) <=  max(|a_n*z^n|+|a_{n-1}*z^{n-1}|+ ... + |a_1*z| + |a_0|), and 
-            the latter is constant on the boundary of the disk, we simplify the computation
-            by just returning that constant value, instead of actually maximizing |Q(x)|. 
+            over the segment, which will be attained at an endpoint.  
             This should probably be moved out of the TopPoly class eventually.
         """
         Q = self.derivative()
-        s1, s2 = CIF(segment[0]), CIF(segment[1])
-        z0 = s1/2 + s2/2
-        r0 = abs(z0-s1)
+        s = max([abs(segment[0].cif()), abs(segment[1].cif())])
+
         d = Q.degree
         max_deriv = 0
         for i in range(d+1):
-            a = CIF(Q.coeff(i))
-            for k in range(d+1):
-                max_deriv += abs(a)*binomial(i,k)*abs((z0**k)*(r0**(i-k)))
+            a = Q.coeff(i)
+            max_deriv += abs(a)*s**i
         return max_deriv
 
 
@@ -237,6 +286,8 @@ class TopPoly:
         Q = self.derivative()
         a,b = edge.point(0), edge.point(1)
         a_lifts, b_lifts = self.lifts(a), self.lifts(b)
+        make_intervals_disjoint(a_lifts, self.max_precision())
+        make_intervals_disjoint(b_lifts, self.max_precision())
         
         lifted_edges = []
 
@@ -244,14 +295,14 @@ class TopPoly:
         ## we lift a point c along the line from a to b that is very close to a, so that each lift of 
         ## c is distance <D from some lift of a. For a given lift A of a, the number of edges emanating 
         ## from A is the number of lifts of c that are D-close to A.
-        t = QQ(1)/100000
+        t = QQbar(1)/100000
         def init_edge(t, lifted_edges):
-            c = b*t + (1-t)*a
+            c = Point(b.alg()*t + (1-t)*a.alg())
             c_lifts = self.lifts(c)
             for A in a_lifts:
                 for C in c_lifts:
                     D = self.dist_to_pcs([a,c])/(2*self.max_deriv([A,C]))
-                    if abs(CIF(A)-CIF(C)) < D:
+                    if abs(A.cif()-C.cif()) < D:
                         lifted_edges.append([A])
             return t, lifted_edges
 
@@ -263,21 +314,25 @@ class TopPoly:
 
         ## we extend the lift of each edge one segment at a time, until we have the full lift. Each
         ## iteration of below function extends by one segment. 
-        def extend_edges(t,dt,interval,lifted_edges,finished):
-            s1 = b*t+(1-t)*a
-            s2 = b*(t+dt)+(1-(t+dt))*a
+        def extend_edges(t, dt, interval, lifted_edges, finished):
+            s1 = Point(b.alg()*t + (1-t)*a.alg())
+            s2 = Point(b.alg()*(t+dt)+(1-(t+dt))*a.alg())
             lifted_segs = []
     
             seg = [s1,s2]
-            s1_lifts = self.lifts(s1)
+            s1_lifts = []
+            for e in lifted_edges:
+                if e[-1] not in s1_lifts:
+                    s1_lifts.append(e[-1])
             s2_lifts = self.lifts(s2)
+            make_intervals_disjoint(s2_lifts, self.max_precision())
     
             for S1,S2 in it.product(s1_lifts,s2_lifts):
                 
                 ## if A and B are lifts of a and b, and abs(A-B) < D, then the image under self of the segment A--->B 
                 ## is isotopic to the segment a--->b. So the segment A--->B is isotopic to a lift of a--->b.
                 D = self.dist_to_pcs(seg)/(2*self.max_deriv([S1,S2]))
-                if abs(CIF(S1)-CIF(S2)) < D:
+                if abs(S1.cif()-S2.cif()) < D:
                     lifted_segs.append([S1,S2])
             
             ## if we have fewer than self.degree lifted segments, then we are missing some. This would
@@ -316,7 +371,7 @@ class TopPoly:
                                 ## try to jump to the end. If the segment from the last point in the lifted
                                 ## edge so far to one of the lifts of b has length less than D, then this segment
                                 ## will do, and we can finish.
-                                if abs(CIF(lifted[-1]) - CIF(B)) < D:
+                                if abs(lifted[-1].cif() - B.cif()) < D:
                                     lifted.append(B)
                                     finished[i] = True
                                     break
@@ -325,7 +380,7 @@ class TopPoly:
                         if not finished[i]:
                             for i in range(len(lifted_segs)):
                                 seg = lifted_segs[i]
-                                if CIF(lifted[-1]).overlaps(CIF(seg[0])):
+                                if lifted[-1].cif().overlaps(seg[0].cif()):
                                     lifted.append(seg[1])
                                     _ = lifted_segs.pop(i)
                                     break
@@ -350,82 +405,83 @@ class TopPoly:
             all_edges = []
 
             # lift all the edges
+            subvertices = []
+            vertices = []
             for i in range(T.num_edges()):
                 e = T.edge(i)
                 e_lifted_edges = self.lift_edge(e)
                 print('edge {} lifted.'.format(e.index()))
 
                 for points in e_lifted_edges:
+                    subvertices += points[1:-1]
+                    vertices.append(points[0])
+                    vertices.append(points[-1])
                     edge = MarkedEdge(points, i, None)
                     all_edges.append(edge)
 
-            # set indices so they agree with the order in which edges are listed
+            # set indices so they agree with the order in which edges are listed.
             for i in range(len(all_edges)):
                 e = all_edges[i]
                 e._index = i
 
-            ## check that any two distinct points in the lifted postcritical set are at least as far apart 
-            ## as the diameter of their intervals. This ensures that we can test equality of points in lifted_pcs
-            ## by comparing their intervals. This is important because confirming that two algebraic numbers 
-            ## are equal is computationally hard, but checking that two intervals overlap is easy.
-            max_pt = max([CIF(p).abs() for p in self.lifted_pcs()])
-            max_dist = max([abs(CIF(a)-CIF(b)) for a,b in it.product(self.postcritical_set(),self.postcritical_set())])
-            D = max_dist/(2*self.max_deriv([max_pt,-max_pt]))
-            max_interval_diam = max([CIF(a).diameter() for a in self.lifted_pcs()])
-            assert D > 2*max_interval_diam
+            lpcs = self.lifted_pcs()
+
+            # precision required for points in the lifted postcritical set to have disjoint intervals.
+            prec = max([p.precision() for p in lpcs]) 
+
+            # increase the precision for vertices to prec, so we can compare intervals to get rid of duplicates.
+            for v in vertices:
+                v.set_precision(prec)
+
+            # get rid of duplicates in vertices.
+            distinct_verts = []
+            for v in vertices:
+                if v not in distinct_verts:
+                    distinct_verts.append(v)
+
+            # now we can make sure all points in the triangulation have disjoint intervals.
+            make_intervals_disjoint(subvertices+distinct_verts, self.max_precision())
 
             T = LiftedTriangulation(all_edges, self)
+
+            is_embedded, bad_segs = T.is_embedded()
+            while not is_embedded:
+                return T.plot()
+                for bad_seg in bad_segs:
+                    edge_index = bad_seg[0]
+                    seg_index = bad_seg[1]
+                    edge = T.edge(edge_index)
+                    seg = edge.segment(seg_index)
+                    S0 = seg[0]
+                    S1 = seg[1]
+                    s0, s1 = Point(self.evaluate(S0.alg())), Point(self.evaluate(S1.alg()))
+                    c = (s0.alg() + s1.alg())/2
+                    c_lifts = self.lifts(c)
+                    D = self.dist_to_pcs([s0,s1])/(2*self.max_deriv(seg))
+                    candidates = [C for C in c_lifts if abs(C.cif() - S0.cif()) < D]
+                    if len(candidates) == 1:
+                        C = candidates[0]
+                        T.subdivide_segment(edge_index, seg_index, C)
+                    else:  ## I don't think this should ever happen, but just to be safe...
+                        raise SubdivisionError('unable subdivide edge.')
+                is_embedded, bad_segs = T.is_embedded()
+
             self._lifted_tri = T
         return self._lifted_tri
 
-
-#   def plot_lifted_edge(self, edge):
-#       colors = ['red','blue','green']
-#       lifted_edge = self.lift_edge(edge)
-#       G = Graphics()
-#       j=0
-#       for e in lifted_edge:
-#           G += line([CIF(e[i]) for i in range(len(e))],color=colors[j%3])
-#           j+= 1
-#       return G.show(dpi=1000)
-
-
-    def pc_triangulation(self):
-        """Return a triangulation whose vertices are the postcritical set. This will always be a 
-            linear triangulation (each edge is a single line segment). Note that at this point 
-            we don't include edges with endpoints at infinity. Results are cached.
-        """
-        if self._pc_triangulation == None:
-            PCL = self.postcritical_set()
-            L = len(PCL)
-            edge_list = []
-            for i in range(L-1):
-                for j in range(i+1,L):
-                    a,b = PCL[i],PCL[j]
-                    e = Edge([a,b])
-                    s = e.segment(0)
-                    if e not in edge_list:
-                        to_trash = False
-                        for edge in edge_list:
-                            if s.transverse_to(edge.segment(0)):
-                                to_trash = True
-                                break
-                        if not to_trash:
-                            for k in range(L):
-                                if k != i and k != j:
-                                    if s.on_seg(PCL[k]):
-                                        to_trash = True
-                                        break
-                        if not to_trash:
-                            edge_list.append(e)
-
-            for i in range(len(edge_list)):
-                edge_list[i]._index = i
-
-            T = Triangulation(edge_list, self)
-            self._pc_triangulation = T
-
-        return self._pc_triangulation
+def make_intervals_disjoint(points, max_precision):
+    for i in range(len(points)-1):
+        for j in range(i+1,len(points)):
+            p, q = points[i], points[j]
+            prec = max([p.precision(), q.precision()])
+            while p.overlaps(q):
+                prec = 2*prec
+                if prec < max_precision:
+                    p.set_precision(prec)
+                    q.set_precision(prec)
+                else:
+                    print(p,q)
+                    raise IntervalError('max precision reached: two of the points are too close together to be distinguished by intervals.')
 
 
 def get_random_tp(degree,period):
@@ -456,4 +512,34 @@ def quadratic(type):
         return TopPoly([1,0,AIRPLANE])
     else:
         return 'Error: type must be \'rabbit\', \'corabbit\', or \'airplane\'.'
+
+class SubdivisionError(Exception):
+    def __init__(self,msg):
+        if msg:
+            self.message = msg
+        else:
+            self.message = None
+
+    def __str__(self):
+        return 'SubdivisionError: {0}'.format(self.message)
+
+class IntervalError(Exception):
+    def __init__(self,msg):
+        if msg:
+            self.message = msg
+        else:
+            self.message = None
+
+    def __str__(self):
+        return 'IntervalError: {0}'.format(self.message)
+
+class IterationError(Exception):
+    def __init__(self,msg):
+        if msg:
+            self.message = msg
+        else:
+            self.message = None
+
+    def __str__(self):
+        return 'IterationError: {0}'.format(self.message)
 
