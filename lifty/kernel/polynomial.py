@@ -1,11 +1,12 @@
-
+from __future__ import print_function
 from lifty.sage_types import *
 import random
 import itertools as it
 import sys
 
-from lifty.kernel.triangulation import Point, Segment, Edge, MarkedEdge, Vertex, Triangulation, LiftedTriangulation
+from lifty.kernel.triangulation import Point, Segment, Edge, MarkedEdge, Vertex, MarkedVertex, Triangulation, LiftedTriangulation
 from lifty.constants import RABBIT, CORABBIT, AIRPLANE
+from lifty.kernel.errors import IntervalError, IterationError, SubdivisionError
 
 COLORS = ['blue','red','green','cyan','black','grey','pink','purple','orange','brown','limegreen','olive']
 
@@ -390,12 +391,12 @@ class TopPoly:
 
         ## the first iteration of function for extend edges
         t, dt, interval, lifted_edges, finished = extend_edges(0, QQ(1)/10, [0,1], lifted_edges, [False for _ in range(self.degree)])
-        print(n(t),n(dt))
+        print('|',end='')
 
         ## continue to iterate the extend_edge function until all edges are finished.
         while False in finished:
             t, dt, interval, lifted_edges, finished = extend_edges(t, dt, interval, lifted_edges, finished)
-            print(n(t),n(dt))
+            print('|',end='')
         return lifted_edges
 
     def lifted_tri(self):
@@ -407,9 +408,18 @@ class TopPoly:
             all_edges = []
 
             # lift all the edges
+            vertices = []
             subvertices = []
-            vertex_pts = self.lifted_pcs()
-            vertices = [Vertex(p) for p in vertex_pts]
+
+            # make vertices. These are MarkedVertices, so that we store info about where each one maps to in the pc_triangulation
+            pc_verts = [v for v in T.finite_vertices()]
+            for v in pc_verts:
+                p = v.point()
+                p_lifts = self.lifts(p)
+                for P in p_lifts:
+                    vertices.append(MarkedVertex(P,v))
+
+            vertex_pts = [v.point() for v in vertices]
             for i in range(T.num_finite_edges()):
                 e = T.edge(i)
                 e_lifted_edges = self.lift_edge(e)
@@ -509,34 +519,4 @@ def quadratic(type):
         return TopPoly([1,0,AIRPLANE])
     else:
         return 'Error: type must be \'rabbit\', \'corabbit\', or \'airplane\'.'
-
-class SubdivisionError(Exception):
-    def __init__(self,msg):
-        if msg:
-            self.message = msg
-        else:
-            self.message = None
-
-    def __str__(self):
-        return 'SubdivisionError: {0}'.format(self.message)
-
-class IntervalError(Exception):
-    def __init__(self,msg):
-        if msg:
-            self.message = msg
-        else:
-            self.message = None
-
-    def __str__(self):
-        return 'IntervalError: {0}'.format(self.message)
-
-class IterationError(Exception):
-    def __init__(self,msg):
-        if msg:
-            self.message = msg
-        else:
-            self.message = None
-
-    def __str__(self):
-        return 'IterationError: {0}'.format(self.message)
 

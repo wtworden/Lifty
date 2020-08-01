@@ -1,9 +1,12 @@
 
 
+from __future__ import print_function
 
 from lifty.sage_types import *
 import random
 import itertools as it
+
+from lifty.kernel.errors import IntervalError, IterationError, SubdivisionError
 
 
 COLORS = ['blue','red','green','cyan','black','grey','pink','purple','orange','brown','limegreen','olive']
@@ -28,7 +31,7 @@ class Triangulation:
                 if v not in self._vertices:
                     v._triangulation = self
                     self._vertices.append(v)
-        self._vertices.append(Vertex(Infinity))
+        self._vertices.append(Vertex(Point(Infinity)))
 
         for i in range(len(self._vertices)):
             self._vertices[i]._index = i
@@ -45,18 +48,21 @@ class Triangulation:
         p = v.point()
         L = [[e,e.point(1)] for e in self.edges() if e.vert(0) == v] + [[e,e.point(-2)] for e in self.edges() if e.vert(1) == v]
 
-        for j in range(len(L)):
-            q1, q2 = L[j][1], L[(j+1)%(len(L))][1]
-            prec = max([q1.precision(), q2.precision()])
-            arg1 = (q1.cif() - p.cif()).arg()
-            arg2 = (q2.cif() - p.cif()).arg()
-            while arg1.overlaps(arg2):
-                prec = 2*prec
-                if prec < self.top_poly().max_precision():
-                    q1.set_precision(prec)
-                    q2.set_precision(prec)
-                else:
-                    raise IntervalError('max precision reached: cyclic ordering of edges around vertex {} cannot be determined.'.format(vert_indx))
+
+        if len(L) > 1:
+            # make sure the ordering of segments coming from v can be determined using intervals.
+            for j in range(len(L)):
+                q1, q2 = L[j][1], L[(j+1)%(len(L))][1]
+                prec = max([q1.precision(), q2.precision()])
+                arg1 = (q1.cif() - p.cif()).arg()
+                arg2 = (q2.cif() - p.cif()).arg()
+                while arg1.overlaps(arg2):
+                    prec = 2*prec
+                    if prec < self.top_poly().max_precision():
+                        q1.set_precision(prec)
+                        q2.set_precision(prec)
+                    else:
+                        raise IntervalError('max precision reached: cyclic ordering of edges around vertex {} cannot be determined.'.format(vert_indx))
 
         L.sort(key = lambda x: (x[1].cif()-p.cif()).arg())
         incident_edges = [e[0].index() for e in L]
@@ -105,42 +111,61 @@ class Triangulation:
         return True
 
     def add_edges_to_infinity(self):
-        if not self.is_lifted_tri():
-            verts = self.finite_vertices()
-            inf_vert = self.num_vertices() - 1
-            for v in verts:
-                L = len(v.incident_edges())
-                edges_to_infty = []
-                for i in range(L):
-                    e1, e2 = v.incident_edges()[i], v.incident_edges()[(i+1)%L]
-                    v1, v2 = self.edge(e1).other_vert(v), self.edge(e2).other_vert(v)
-                    angle = ((v2.point().cif() - v.point().cif())*exp(-I*(v1.point().cif() - v.point().cif()).arg())).arg()
-                    if angle.overlaps(RIF(pi)) or angle < 0:
-                        print(v.index(),v1.index(),v2.index())
+        if self.num_infinite_edges() == 0: # only do something if we don't already have edges to infty
+            if not self.is_lifted_tri():
+                verts = self.finite_vertices()
+                inf_vert = self.num_vertices() - 1
+
+                # for each vertex we determine if its on the boundary (since the pc_tri is convex, we just look
+                # for an angle between incident edges that is >= pi), then if it is we put the edge to infinity halfway 
+                # between (in angle) these two edges.
+                for v in verts:
+                    L = len(v.incident_edges())
+                    edges_to_infty = []
+
+                    # for each i, check if the angle between incident edge i and i+1 (mod L) is >= pi
+                    for i in range(L):
+                        e1, e2 = v.incident_edges()[i], v.incident_edges()[(i+1)%L]
+                        v1, v2 = self.edge(e1).other_vert(v), self.edge(e2).other_vert(v)
+                        angle = ((v2.point().cif() - v.point().cif())*exp(-I*(v1.point().cif() - v.point().cif()).arg())).arg()
+                        print(angle)
+                        # sage returns arg in the range [-pi,pi], so an angle between e1 and e2 of >= pi
+                        # corresponds here to angle <= 0 or angle = pi
                         a1 = v1.point().alg()
                         a2 = v2.point().alg()
                         a = v.point().alg()
-                        b = -((a2-a)/(a2-a).abs() + (a1-a)/(a1-a).abs())/2
+                        print((a1,a2,a))
+                        if angle.overlaps(RIF(pi)):
+                            b = (a1-a).imag() - QQbar(I)*(a1-a).real()
+                        elif angle.overlaps(RIF(0)):
+                            b = -(a1-a)
+                        elif angle < 0:
+                            b = -((a2-a)/(a2-a).abs() + (a1-a)/(a1-a).abs())/2
+
                         s = Point((b/b.abs()) + a)
                         e = Edge([v,self.vertices()[-1]],[v.point(), s, Point(Infinity)])
                         self._edges.append(e)
                         e._index = self.num_edges()-1
                         edges_to_infty.append((e,(i+1)%L))
-                edges_to_infty.reverse()
-                for e,j in edges_to_infty:
-                    v.incident_edges().insert(j,e.index())
-#            E = self.edge(self.num_finite_edges())
-#            inf_edges_ordered = [E]
-#            v = E.vert(0)
-#            while len(inf_edges_ordered) < self.num_infinite_edges():
-#                next_index = (v.incident_edges().index(E.index()) + 1)%(v.valence())
-#                e = self.edge(v.incident_edges()[next_index])
-#                v = e.other_vert(v)
-#                next_index = (v.incident_edges().index(e.index()) + 1)%(v.valence())
-#                E = self.edge(v.incident_edges()[next_index])
-#                inf_edges_ordered.append(E)
-#            inf_edges_ordered.reverse()
-#            self.vertex(-1)._incident_edges = inf_edges_ordered
+                    edges_to_infty.sort(key=lambda x: x[1])
+                    edges_to_infty.reverse()
+                    for e,j in edges_to_infty:
+                        v.incident_edges().insert(j,e.index())
+                E = self.edge(self.num_finite_edges())
+                inf_edges_ordered = [E.index()]
+                v = E.vert(0)
+                while len(inf_edges_ordered) < self.num_infinite_edges():
+                    next_index = (v.incident_edges().index(E.index()) + 1)%(v.valence())
+                    e = self.edge(v.incident_edges()[next_index])
+                    v = e.other_vert(v)
+                    next_index = (v.incident_edges().index(e.index()) + 1)%(v.valence())
+                    E = self.edge(v.incident_edges()[next_index])
+                    inf_edges_ordered.append(E.index())
+                inf_edges_ordered.reverse()
+                self.vertex(-1)._incident_edges = inf_edges_ordered
+            else:
+                pc_tri = self.top_poly().pc_triangulation()
+                pc_tri.add_edges_to_infinity()
 
 
 
@@ -205,15 +230,19 @@ class Triangulation:
         for i in range(self.num_edges()):
             edge = self.edge(i)
             points = edge.finite_points()
+            ### for some reason Sage will not plot a line if its endpoints are elements of the ComplexIntervalField
+            ### with imaginary part =0. So, as a somewhat hacky workaround we'll just add a very small multiple of I
+            ### to each point.
+            eps = CIF(0.00000000001*I)
             if self.is_lifted_tri():
-                lines.append(Line([points[j].cif() for j in range(len(points))], color=COLORS[edge.maps_to()], thickness=thickness, zorder=10))
+                lines.append(Line([points[j].cif()+eps for j in range(len(points))], color=COLORS[edge.maps_to()], thickness=thickness, zorder=20))
             else:
                 f = self.num_finite_edges()
                 if i < f:
                     color = COLORS[i%12]
                 else:
                     color = COLORS[f]
-                lines.append(Line([points[j].cif() for j in range(len(points))], color=color, thickness=thickness, zorder=10))
+                lines.append(Line([points[j].cif()+eps for j in range(len(points))], color=color, thickness=thickness, zorder=20))
         for L in lines:
             G += L
         if show_vertices:
@@ -223,15 +252,16 @@ class Triangulation:
                     if v.point().cif().overlaps(c.cif()):
                         color = 'red'
                         break
-                G += Pt(v.point().cif(), color=color, zorder=20)
+                G += Pt(v.point().cif(), color=color, zorder=30)
         G.show(dpi=DPI, aspect_ratio=aspect_ratio)
 
 class LiftedTriangulation(Triangulation):
     def __init__(self, marked_edges, top_poly):
         Triangulation.__init__(self, marked_edges, top_poly)
 
+        self._pc_triangulation = top_poly.pc_triangulation()
         self._is_lifted = True
-
+        self._vertices[-1] = MarkedVertex(Point(Infinity),self._pc_triangulation.vertices()[-1])
 
 class Edge:
     def __init__(self, vertices, points, index = None):
@@ -439,6 +469,16 @@ class Vertex:
 
     def __ne__(self,other):
         return self.point() != other.point()
+
+class MarkedVertex(Vertex):
+    def __init__(self, point, maps_to, index=None, incident_edges=[]):
+        Vertex.__init__(self, point, index, incident_edges)
+
+        self._maps_to = maps_to
+
+    def maps_to(self):
+        return self._maps_to
+
 
 class Point:
     def __init__(self, sage_alg_num, prec=53):
