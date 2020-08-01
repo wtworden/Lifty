@@ -14,6 +14,9 @@ from sage.all import load_attach_path
 from sage.all import binomial
 from sage.all import n
 from sage.all import ComplexIntervalField
+from sage.all import pi
+from sage.all import exp
+from sage.all import I
 
 from sage.misc.misc import SAGE_TMP
 

@@ -150,12 +150,14 @@ class TopPoly:
         """
         if self._pc_triangulation == None:
             pcs = self.postcritical_set()
+            vertices = [Vertex(p) for p in pcs]
             L = len(pcs)
             edge_list = []
             for i in range(L-1):
                 for j in range(i+1,L):
-                    a,b = pcs[i],pcs[j]
-                    e = Edge([a,b], self)
+                    a,b = pcs[i], pcs[j]
+                    v,w = vertices[i], vertices[j]
+                    e = Edge([v,w],[a,b], self)
                     s = e.segment(0)
                     if e not in edge_list:
                         to_trash = False
@@ -406,17 +408,18 @@ class TopPoly:
 
             # lift all the edges
             subvertices = []
-            vertices = []
-            for i in range(T.num_edges()):
+            vertex_pts = self.lifted_pcs()
+            vertices = [Vertex(p) for p in vertex_pts]
+            for i in range(T.num_finite_edges()):
                 e = T.edge(i)
                 e_lifted_edges = self.lift_edge(e)
                 print('edge {} lifted.'.format(e.index()))
 
                 for points in e_lifted_edges:
+                    j,k = vertex_pts.index(points[0]), vertex_pts.index(points[-1])
+                    v,w = vertices[j], vertices[k]
                     subvertices += points[1:-1]
-                    vertices.append(points[0])
-                    vertices.append(points[-1])
-                    edge = MarkedEdge(points, i, None)
+                    edge = MarkedEdge([v,w],points, i, None)
                     all_edges.append(edge)
 
             # set indices so they agree with the order in which edges are listed.
@@ -430,17 +433,12 @@ class TopPoly:
             prec = max([p.precision() for p in lpcs]) 
 
             # increase the precision for vertices to prec, so we can compare intervals to get rid of duplicates.
-            for v in vertices:
+            for v in vertex_pts:
                 v.set_precision(prec)
 
-            # get rid of duplicates in vertices.
-            distinct_verts = []
-            for v in vertices:
-                if v not in distinct_verts:
-                    distinct_verts.append(v)
 
             # now we can make sure all points in the triangulation have disjoint intervals.
-            make_intervals_disjoint(subvertices+distinct_verts, self.max_precision())
+            make_intervals_disjoint(subvertices+vertex_pts, self.max_precision())
 
             T = LiftedTriangulation(all_edges, self)
 

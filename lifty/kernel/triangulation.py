@@ -15,6 +15,7 @@ class Triangulation:
         for i in range(len(edges)):
             assert edges[i].index() == i
         self._edges = edges
+        self._num_finite_edges = len(edges)
         self._top_poly = top_poly
 
         for edge in edges:
@@ -27,11 +28,12 @@ class Triangulation:
                 if v not in self._vertices:
                     v._triangulation = self
                     self._vertices.append(v)
+        self._vertices.append(Vertex(Infinity))
 
         for i in range(len(self._vertices)):
             self._vertices[i]._index = i
 
-        for i in range(len(self._vertices)):
+        for i in range(len(self._vertices)-1):
             self.set_incident_edges(i)
 
         self._is_lifted = False
@@ -39,11 +41,10 @@ class Triangulation:
         self._linearized = None
 
     def set_incident_edges(self, vert_indx):
-        v = self._vertices[vert_indx]
+        v = self.vertices()[vert_indx]
         p = v.point()
-        L = [[e,e.point(1)] for e in self._edges if e.vert(0) == v] + [[e,e.point(-2)] for e in self._edges if e.vert(1) == v]
-            ### TO DO: need to make sure the intervals give angles between adjacent edges that are intervals not containing zero.
-            ###        otherwise, increase complexity. At this point we know all subvertices have disjoint intervals, and self is embedded.
+        L = [[e,e.point(1)] for e in self.edges() if e.vert(0) == v] + [[e,e.point(-2)] for e in self.edges() if e.vert(1) == v]
+
         for j in range(len(L)):
             q1, q2 = L[j][1], L[(j+1)%(len(L))][1]
             prec = max([q1.precision(), q2.precision()])
@@ -59,7 +60,7 @@ class Triangulation:
 
         L.sort(key = lambda x: (x[1].cif()-p.cif()).arg())
         incident_edges = [e[0].index() for e in L]
-        self._vertices[vert_indx]._incident_edges = incident_edges
+        self.vertices()[vert_indx]._incident_edges = incident_edges
 
     def top_poly(self):
         return self._top_poly
@@ -70,8 +71,14 @@ class Triangulation:
     def vertices(self):
         return self._vertices
 
+    def finite_vertices(self):
+        return self._vertices[:-1]
+
     def num_vertices(self):
         return len(self._vertices)
+
+    def num_finite_vertices(self):
+        return len(self._vertices) - 1
 
     def edge(self,i):
         return self._edges[i]
@@ -79,51 +86,64 @@ class Triangulation:
     def edges(self):
         return self._edges
 
+    def finite_edges(self):
+        return self._edges[:self.num_finite_edges()]
+
+    def num_finite_edges(self):
+        return self._num_finite_edges
+
+    def num_infinite_edges(self):
+        return self.num_edges() - self.num_finite_edges()
+
     def num_edges(self):
         return len(self._edges)
 
     def is_linear(self):
-        for e in self.edges():
+        for e in self.finite_edges():
             if len(e.segments()) > 1:
                 return False
         return True
 
-    def linearized(self):
-        if not self.is_linear():
-            if self._linearized == None:
-                straight_edges = []
-                for i in range(self.num_edges()):
-                    e = self.edge(i)
-                    if self.is_lifted_tri():
-                        straight_edges.append(MarkedEdge([e.point(0),e.point(-1)], e.maps_to(), e.index()))
-                    else:
-                        straight_edges.append(Edge([e.point(0),e.point(-1)], e.index()))
-                if self.is_lifted_tri():
-                    T = LiftedTriangulation(straight_edges, self.polynomial())
-                else:
-                    T = Triangulation(straight_edges)
-                if not T.is_embedded():
-                    return 'not embedded'
-                for i in range(self.num_vertices()):
-                    inds1 = self.vertex(i).incident_edges()
-                    inds2 = T.vertex(i).incident_edges()
-                    l = len(inds1)
-                    if not inds1 in [[inds2[(i+j)%l] for i in range(l)] for j in range(l)]:
-                        return 'vertex bad'
-                self._linearized = T
-            return self._linearized
-        else:
-            return None
-
     def add_edges_to_infinity(self):
         if not self.is_lifted_tri():
-            for v in self.vertices():
-                v_edges = v.incident_edges()
-                l = len(v_edges)
-                for i in range(l):
-                    e1 = self.edge(v_edges[i])
-                    e2 = self.edge(v_edges[(i+1)%l])
-                    
+            verts = self.finite_vertices()
+            inf_vert = self.num_vertices() - 1
+            for v in verts:
+                L = len(v.incident_edges())
+                edges_to_infty = []
+                for i in range(L):
+                    e1, e2 = v.incident_edges()[i], v.incident_edges()[(i+1)%L]
+                    v1, v2 = self.edge(e1).other_vert(v), self.edge(e2).other_vert(v)
+                    angle = ((v2.point().cif() - v.point().cif())*exp(-I*(v1.point().cif() - v.point().cif()).arg())).arg()
+                    if angle.overlaps(RIF(pi)) or angle < 0:
+                        print(v.index(),v1.index(),v2.index())
+                        a1 = v1.point().alg()
+                        a2 = v2.point().alg()
+                        a = v.point().alg()
+                        b = -((a2-a)/(a2-a).abs() + (a1-a)/(a1-a).abs())/2
+                        s = Point((b/b.abs()) + a)
+                        e = Edge([v,self.vertices()[-1]],[v.point(), s, Point(Infinity)])
+                        self._edges.append(e)
+                        e._index = self.num_edges()-1
+                        edges_to_infty.append((e,(i+1)%L))
+                edges_to_infty.reverse()
+                for e,j in edges_to_infty:
+                    v.incident_edges().insert(j,e.index())
+#            E = self.edge(self.num_finite_edges())
+#            inf_edges_ordered = [E]
+#            v = E.vert(0)
+#            while len(inf_edges_ordered) < self.num_infinite_edges():
+#                next_index = (v.incident_edges().index(E.index()) + 1)%(v.valence())
+#                e = self.edge(v.incident_edges()[next_index])
+#                v = e.other_vert(v)
+#                next_index = (v.incident_edges().index(e.index()) + 1)%(v.valence())
+#                E = self.edge(v.incident_edges()[next_index])
+#                inf_edges_ordered.append(E)
+#            inf_edges_ordered.reverse()
+#            self.vertex(-1)._incident_edges = inf_edges_ordered
+
+
+
                     
 
     def combinatorialized(self):
@@ -131,11 +151,11 @@ class Triangulation:
 
     def is_embedded(self):
         E = self._edges
-        for i in range(self.num_edges()):
+        for i in range(self.num_finite_edges()):
             e0 = self.edge(i)
             z0 = (e0.point(0).cif()+e0.point(-1).cif())/2
             r0 = abs(z0-e0.point(0).cif())
-            for j in range(i+1,self.num_edges()):
+            for j in range(i+1,self.num_finite_edges()):
                 e1 = self.edge(j)
                 z1 = (e1.point(0).cif()+e1.point(-1).cif())/2
                 r1 = abs(z1-e1.point(0).cif())
@@ -179,27 +199,32 @@ class Triangulation:
         return self._is_lifted
 
 
-    def plot(self, thickness=.7, DPI=400, show_vertices=True):
+    def plot(self, thickness=.7, DPI=400, aspect_ratio='automatic',show_vertices=True):
         G = Graphics()
         lines = []
         for i in range(self.num_edges()):
             edge = self.edge(i)
-            points = edge.points()
+            points = edge.finite_points()
             if self.is_lifted_tri():
                 lines.append(Line([points[j].cif() for j in range(len(points))], color=COLORS[edge.maps_to()], thickness=thickness, zorder=10))
             else:
-                lines.append(Line([points[j].cif() for j in range(len(points))], color=COLORS[i], thickness=thickness, zorder=10))
+                f = self.num_finite_edges()
+                if i < f:
+                    color = COLORS[i%12]
+                else:
+                    color = COLORS[f]
+                lines.append(Line([points[j].cif() for j in range(len(points))], color=color, thickness=thickness, zorder=10))
         for L in lines:
             G += L
         if show_vertices:
-            for v in self._vertices:
+            for v in self.finite_vertices():
                 color = 'black'
                 for c in self.top_poly().postcritical_set():
                     if v.point().cif().overlaps(c.cif()):
                         color = 'red'
                         break
                 G += Pt(v.point().cif(), color=color, zorder=20)
-        G.show(dpi=DPI)
+        G.show(dpi=DPI, aspect_ratio=aspect_ratio)
 
 class LiftedTriangulation(Triangulation):
     def __init__(self, marked_edges, top_poly):
@@ -209,10 +234,16 @@ class LiftedTriangulation(Triangulation):
 
 
 class Edge:
-    def __init__(self, points, index = None):
-        self._vertices = [Vertex(points[0]),Vertex(points[-1])]
+    def __init__(self, vertices, points, index = None):
+        self._vertices = vertices
         self._points = points
-        self._segments = [Segment([points[i],points[i+1]], self) for i in range(len(points)-1)]
+        if points[-1].alg() == Infinity:
+            self._finite_points = points[:-1]
+            self._ray = Ray([points[-2], points[-1]], self)
+        else:
+            self._finite_points = points
+            self._ray = None
+        self._segments = [Segment([self._finite_points[i],self._finite_points[i+1]], self) for i in range(len(self._finite_points)-1)]
         self._index = index
         self._triangulation = None
 
@@ -222,11 +253,20 @@ class Edge:
     def vert(self,i):
         return self._vertices[i]
 
+    def other_vert(self, vert):
+        if vert == self.vert(0):
+            return self.vert(1)
+        elif vert == self.vert(1):
+            return self.vert(0)
+
     def point(self,i):
         return self._points[i]
 
     def points(self):
         return self._points
+
+    def finite_points(self):
+        return self._finite_points
 
     def segment(self,i):
         return self._segments[i]
@@ -248,14 +288,24 @@ class Edge:
 
 
 class MarkedEdge(Edge):
-    def __init__(self, points, maps_to, index):
-        Edge.__init__(self, points, index)
+    def __init__(self, vertices, points, maps_to, index):
+        Edge.__init__(self, vertices, points, index)
 
         self._maps_to = maps_to
 
     def maps_to(self):
         return self._maps_to
 
+class Ray:
+    def __init__(self, endpoints, edge):
+        self._endpoints = endpoints
+        self._edge = edge
+
+    def edge(self):
+        return self._edge
+
+    def endpoint(self,i):
+        return self._endpoints[i]
 
 class Segment:
     def __init__(self, endpoints, edge):
@@ -362,7 +412,7 @@ class Segment:
 
 
 class Vertex:
-    def __init__(self, point, index=None, incident_edges=None):
+    def __init__(self, point, index=None, incident_edges=[]):
 
         self._point = point
         self._index = index
@@ -378,6 +428,9 @@ class Vertex:
     def index(self):
         return self._index
 
+    def valence(self):
+        return len(self.incident_edges())
+
     def incident_edges(self):
         return self._incident_edges
 
@@ -390,8 +443,16 @@ class Vertex:
 class Point:
     def __init__(self, sage_alg_num, prec=53):
         self._alg = sage_alg_num
-        self._cif = self._alg.interval(ComplexIntervalField(prec))
+        if self._alg == Infinity:
+            self._cif = CIF(Infinity)
+            self._is_infinity = True
+        else:
+            self._cif = self._alg.interval(ComplexIntervalField(prec))
+            self._is_infinity = False
         self._precision = prec
+
+    def is_infinity(self):
+        return self._is_infinity
 
     def alg(self):
         return self._alg
