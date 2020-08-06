@@ -17,6 +17,8 @@ from sage.all import ComplexIntervalField
 from sage.all import pi
 from sage.all import exp
 from sage.all import I
+from sage.all import PermutationGroupElement
+from sage.all import RibbonGraph
 
 from sage.misc.misc import SAGE_TMP
 

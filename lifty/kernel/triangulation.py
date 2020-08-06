@@ -112,9 +112,9 @@ class Triangulation:
 
     def add_edges_to_infinity(self):
         if self.num_infinite_edges() == 0: # only do something if we don't already have edges to infty
+            verts = self.finite_vertices()
+            inf_vert = self.vertex(-1)
             if not self.is_lifted_tri():
-                verts = self.finite_vertices()
-                inf_vert = self.num_vertices() - 1
 
                 # for each vertex we determine if its on the boundary (since the pc_tri is convex, we just look
                 # for an angle between incident edges that is >= pi), then if it is we put the edge to infinity halfway 
@@ -128,48 +128,86 @@ class Triangulation:
                         e1, e2 = v.incident_edges()[i], v.incident_edges()[(i+1)%L]
                         v1, v2 = self.edge(e1).other_vert(v), self.edge(e2).other_vert(v)
                         angle = ((v2.point().cif() - v.point().cif())*exp(-I*(v1.point().cif() - v.point().cif()).arg())).arg()
-                        print(angle)
+                        
                         # sage returns arg in the range [-pi,pi], so an angle between e1 and e2 of >= pi
                         # corresponds here to angle <= 0 or angle = pi
-                        a1 = v1.point().alg()
-                        a2 = v2.point().alg()
-                        a = v.point().alg()
-                        print((a1,a2,a))
-                        if angle.overlaps(RIF(pi)):
-                            b = (a1-a).imag() - QQbar(I)*(a1-a).real()
-                        elif angle.overlaps(RIF(0)):
-                            b = -(a1-a)
-                        elif angle < 0:
-                            b = -((a2-a)/(a2-a).abs() + (a1-a)/(a1-a).abs())/2
+                        if angle.overlaps(RIF(pi)) or angle.overlaps(RIF(0)) or angle < 0:
+                            a1 = v1.point().alg()
+                            a2 = v2.point().alg()
+                            a = v.point().alg()
+                            if angle.overlaps(RIF(pi)):
+                                b = (a1-a).imag() - QQbar(I)*(a1-a).real()
+                            elif angle.overlaps(RIF(0)):
+                                b = -(a1-a)
+                            elif angle < 0:
+                                b = -((a2-a)/(a2-a).abs() + (a1-a)/(a1-a).abs())/2
+                            s = Point((b/b.abs()) + a)
+                            e = Edge([v, inf_vert],[v.point(), s, inf_vert.point()])
+                            self._edges.append(e)
+                            e._index = self.num_edges()-1
+                            edges_to_infty.append((e,(i+1)%L))
 
-                        s = Point((b/b.abs()) + a)
-                        e = Edge([v,self.vertices()[-1]],[v.point(), s, Point(Infinity)])
-                        self._edges.append(e)
-                        e._index = self.num_edges()-1
-                        edges_to_infty.append((e,(i+1)%L))
                     edges_to_infty.sort(key=lambda x: x[1])
                     edges_to_infty.reverse()
                     for e,j in edges_to_infty:
                         v.incident_edges().insert(j,e.index())
-                E = self.edge(self.num_finite_edges())
-                inf_edges_ordered = [E.index()]
-                v = E.vert(0)
-                while len(inf_edges_ordered) < self.num_infinite_edges():
-                    next_index = (v.incident_edges().index(E.index()) + 1)%(v.valence())
-                    e = self.edge(v.incident_edges()[next_index])
-                    v = e.other_vert(v)
-                    next_index = (v.incident_edges().index(e.index()) + 1)%(v.valence())
-                    E = self.edge(v.incident_edges()[next_index])
-                    inf_edges_ordered.append(E.index())
-                inf_edges_ordered.reverse()
-                self.vertex(-1)._incident_edges = inf_edges_ordered
             else:
                 pc_tri = self.top_poly().pc_triangulation()
                 pc_tri.add_edges_to_infinity()
+                F = pc_tri.num_finite_edges()
+                for v in verts:
+                    m = len(v.incident_edges())
+                    insertions = []
+                    for i in range(m):
+                        ind1, ind2 = v.incident_edges()[i], v.incident_edges()[(i+1)%m]
+                        e1, e2 = self.edge(ind1), self.edge(ind2)
+                        V = v.maps_to()
+                        IND1, IND2 = e1.maps_to(), e2.maps_to()
+                        j = V.incident_edges().index(IND1)
+                        M = len(V.incident_edges())
+                        next_edge_index = V.incident_edges()[(j+1)%M]
+                        if next_edge_index >= F:
+                            insertions.append(((i+1)%m, next_edge_index))
+                        else:
+                            assert next_edge_index == IND2
+                    insertions.sort()
+                    insertions.reverse()
+                    for i, edge_ind in insertions:
+                        new_edge = MarkedEdge([v, inf_vert],[v.point(), inf_vert.point()], edge_ind)
+                        self._edges.append(new_edge)
+                        new_edge._index = self.num_edges()-1
+                        v.incident_edges().insert(i,new_edge.index())
 
+            E = self.edge(self.num_finite_edges())
+            inf_edges_ordered = [E.index()]
+            v = E.vert(0)
+            while len(inf_edges_ordered) < self.num_infinite_edges():
+                next_index = (v.incident_edges().index(E.index()) + 1)%(v.valence())
+                e = self.edge(v.incident_edges()[next_index])
+                v = e.other_vert(v)
+                next_index = (v.incident_edges().index(e.index()) + 1)%(v.valence())
+                E = self.edge(v.incident_edges()[next_index])
+                inf_edges_ordered.append(E.index())
+            inf_edges_ordered.reverse()
+            self.vertex(-1)._incident_edges = inf_edges_ordered
 
+    def ribbon_graph(self):
+        L = self.num_edges()
+        rho = PermutationGroupElement([(i+1,i+1+L) for i in range(L)])
+        sigma_list = []
+        for v in self.vertices():
+            incident = v.incident_edges()
+            incident_darts = []
+            for i in incident:
+                e = self.edge(i)
+                if e.vertex(0) == v:
+                    incident_darts.append(i+1)
+                elif e.vertex(1) == v:
+                    incident_darts.append(i+1+L)
+            sigma_list.append(tuple(incident_darts))
+        sigma = PermutationGroupElement(sigma_list)
+        return RibbonGraph(sigma,rho)
 
-                    
 
     def combinatorialized(self):
         pass
@@ -283,6 +321,9 @@ class Edge:
     def vert(self,i):
         return self._vertices[i]
 
+    def vertex(self,i):
+        return self._vertices[i]
+
     def other_vert(self, vert):
         if vert == self.vert(0):
             return self.vert(1)
@@ -318,7 +359,7 @@ class Edge:
 
 
 class MarkedEdge(Edge):
-    def __init__(self, vertices, points, maps_to, index):
+    def __init__(self, vertices, points, maps_to, index=None):
         Edge.__init__(self, vertices, points, index)
 
         self._maps_to = maps_to
