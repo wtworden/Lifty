@@ -5,6 +5,10 @@ from __future__ import print_function
 from lifty.sage_types import *
 import random
 import itertools as it
+from curver import create_triangulation
+from curver.kernel.triangulation import Triangulation as CTriangulation
+from curver.kernel.triangulation import Edge as CEdge
+from curver.kernel.triangulation import Triangle as CTriangle
 
 from lifty.kernel.errors import IntervalError, IterationError, SubdivisionError
 
@@ -40,8 +44,7 @@ class Triangulation:
             self.set_incident_edges(i)
 
         self._is_lifted = False
-
-        self._linearized = None
+        self._combinatorial = None
 
     def set_incident_edges(self, vert_indx):
         v = self.vertices()[vert_indx]
@@ -209,8 +212,49 @@ class Triangulation:
         return RibbonGraph(sigma,rho)
 
 
-    def combinatorialized(self):
-        pass
+    def combinatorial(self):
+        if self._combinatorial == None:
+            triangles = []
+            edges_used = []
+            for e in self.edges():
+                for oriented_ind in [int(e.index()), ~int(e.index())]:
+                    if oriented_ind not in edges_used:
+                        e0 = e
+                        ind = e.index()
+                        triangle = [int(oriented_ind)]
+                        if oriented_ind >= 0:
+                            opp_vert = 1
+                        else:
+                            opp_vert = 0
+                        for i in range(2):
+                            v0 = e0.vertex(opp_vert)
+                            L = v0.valence()
+                            prev = (v0.incident_edges().index(ind)-1)%L
+                            ind = v0.incident_edges()[prev]
+                            e0 = self.edge(ind)
+                            if e0.vertex(0) == v0:
+                                triangle.append(int(ind))
+                                opp_vert = 1
+                            elif e0.vertex(1) == v0:
+                                triangle.append(~int(ind))
+                                opp_vert = 0
+                        v0 = e0.vertex(opp_vert)
+                        L = v0.valence()
+                        prev = (v0.incident_edges().index(ind)-1)%L
+                        ind = v0.incident_edges()[prev]
+                        assert ind == e.index()
+                        triangles.append(triangle)
+                        edges_used.extend(triangle)
+            vertex_markings = {}
+            for v in self.vertices():
+                if v.point() in self.top_poly().postcritical_set():
+                    vertex_markings[tuple(v.incident_edges())] = True
+                else:
+                    vertex_markings[tuple(v.incident_edges())] = False
+
+            self._combinatorial = CurverTriangulation(triangles,vertex_markings)
+        return self._combinatorial
+
 
     def is_embedded(self):
         E = self._edges
@@ -300,6 +344,28 @@ class LiftedTriangulation(Triangulation):
         self._pc_triangulation = top_poly.pc_triangulation()
         self._is_lifted = True
         self._vertices[-1] = MarkedVertex(Point(Infinity),self._pc_triangulation.vertices()[-1])
+
+class CurverTriangulation(CTriangulation):
+    def __init__(self,triangles,vertex_markings):
+        c_triangles = []
+        for t in triangles:
+            Ct = CTriangle([CEdge(t[i]) for i in range(len(t))])
+            c_triangles.append(Ct)
+
+
+        CTriangulation.__init__(self,c_triangles)
+
+        self._vertex_markings = dict([(v,False) for v in self.vertices])
+        for v in self.vertices:
+            for w in vertex_markings:
+                if set(w) == set([e.index for e in v]):
+                    self._vertex_markings[v] = vertex_markings[w]
+
+    def vertex_markings(self):
+        return self._vertex_markings
+
+    def is_post_critical(vertex):
+        return self.vertex_markings()[vertex]
 
 class Edge:
     def __init__(self, vertices, points, index = None):

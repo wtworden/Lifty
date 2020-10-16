@@ -179,6 +179,7 @@ class TopPoly:
                 edge_list[i]._index = i
 
             T = Triangulation(edge_list, self)
+            T.add_edges_to_infinity()
             self._pc_triangulation = T
 
         return self._pc_triangulation
@@ -472,7 +473,7 @@ class TopPoly:
                     else:  ## I don't think this should ever happen, but just to be safe...
                         raise SubdivisionError('unable subdivide edge.')
                 is_embedded, bad_segs = T.is_embedded()
-
+            T.add_edges_to_infinity()
             self._lifted_tri = T
         return self._lifted_tri
 
@@ -501,8 +502,9 @@ def get_random_tp(degree,period):
     p = x**d + x
     for i in range(period-2):
         p = p**d + x
-    roots = complex_roots(p,retval='algebraic')
-    c = random.choice(roots)[0]
+    roots = [r[0] for r in complex_roots(p,retval='algebraic')]
+    roots.remove(0)
+    c = random.choice(roots)
     coeffs = [1]+[0 for i in range(d-1)]+[c]
     return TopPoly(coeffs)
 
