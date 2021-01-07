@@ -5,10 +5,12 @@ from __future__ import print_function
 from lifty.sage_types import *
 import random
 import itertools as it
-from curver import create_triangulation
-from curver.kernel.triangulation import Triangulation as CTriangulation
-from curver.kernel.triangulation import Edge as CEdge
-from curver.kernel.triangulation import Triangle as CTriangle
+#from curver import create_triangulation
+#from curver.kernel.triangulation import Triangulation as curverTriangulation
+#from curver.kernel.triangulation import Edge as curverEdge
+#from curver.kernel.triangulation import Triangle as curverTriangle
+
+from lifty.kernel.combinatorial_tri import *
 
 from lifty.kernel.errors import IntervalError, IterationError, SubdivisionError
 
@@ -44,6 +46,7 @@ class Triangulation:
             self.set_incident_edges(i)
 
         self._is_lifted = False
+        self._combinatorial_old = None
         self._combinatorial = None
 
     def set_incident_edges(self, vert_indx):
@@ -121,7 +124,7 @@ class Triangulation:
 
                 # for each vertex we determine if its on the boundary (since the pc_tri is convex, we just look
                 # for an angle between incident edges that is >= pi), then if it is we put the edge to infinity halfway 
-                # between (in angle) these two edges.
+                # (in angle) between these two edges.
                 for v in verts:
                     L = len(v.incident_edges())
                     edges_to_infty = []
@@ -213,19 +216,29 @@ class Triangulation:
 
 
     def combinatorial(self):
-        if self._combinatorial == None:
+        if self._combinatorial is None:
             triangles = []
-            edges_used = []
+            edges = {}
+            c_vertices = [CVertex(i) for i in range(len(self.vertices()))]
             for e in self.edges():
-                for oriented_ind in [int(e.index()), ~int(e.index())]:
-                    if oriented_ind not in edges_used:
+                for label in [int(e.index()), ~int(e.index())]:
+                    if label not in edges:
                         e0 = e
                         ind = e.index()
-                        triangle = [int(oriented_ind)]
-                        if oriented_ind >= 0:
+
+                        if label >= 0:
                             opp_vert = 1
+                            tri_signs = [1]
                         else:
                             opp_vert = 0
+                            tri_signs = [-1]                        
+
+                        if ~label not in edges:
+                            edges[label] = CEdge(ind,[c_vertices[e0.vertex(0).index()], c_vertices[e0.vertex(1).index()]])
+                        else:
+                            edges[label] = edges[~label]
+                        tri_edges = [edges[label]]
+
                         for i in range(2):
                             v0 = e0.vertex(opp_vert)
                             L = v0.valence()
@@ -233,27 +246,83 @@ class Triangulation:
                             ind = v0.incident_edges()[prev]
                             e0 = self.edge(ind)
                             if e0.vertex(0) == v0:
-                                triangle.append(int(ind))
+                                label = ind
                                 opp_vert = 1
+                                tri_signs.append(1)
                             elif e0.vertex(1) == v0:
-                                triangle.append(~int(ind))
+                                label = ~int(ind)
                                 opp_vert = 0
+                                tri_signs.append(-1)
+
+                            if ~label not in edges:
+                                edges[label] = CEdge(ind,[c_vertices[e0.vertex(0).index()], c_vertices[e0.vertex(1).index()]])
+                            else:
+                                edges[label] = edges[~label]
+                            tri_edges.append(edges[label])
+
                         v0 = e0.vertex(opp_vert)
                         L = v0.valence()
                         prev = (v0.incident_edges().index(ind)-1)%L
                         ind = v0.incident_edges()[prev]
                         assert ind == e.index()
+                        triangle = CTriangle(tri_edges, tri_signs)
                         triangles.append(triangle)
-                        edges_used.extend(triangle)
             vertex_markings = {}
-            for v in self.vertices():
+            for i in range(len(self.vertices())):
+                v = self.vertices()[i]
                 if v.point() in self.top_poly().postcritical_set():
-                    vertex_markings[tuple(v.incident_edges())] = True
+                    vertex_markings[i] = [True, True]
                 else:
-                    vertex_markings[tuple(v.incident_edges())] = False
+                    vertex_markings[i] = [False, False]
+                if  v.point().is_infinity():
+                    vertex_markings[i][1] = True
 
-            self._combinatorial = CurverTriangulation(triangles,vertex_markings)
+
+            self._combinatorial = CTriangulation(triangles, c_vertices, vertex_markings)
         return self._combinatorial
+
+#    def combinatorial_old(self):
+#        if self._combinatorial_old is None:
+#            triangles = []
+#            edges_used = []
+#            for e in self.edges():
+#                for oriented_ind in [int(e.index()), ~int(e.index())]:
+#                    if oriented_ind not in edges_used:
+#                        e0 = e
+#                        ind = e.index()
+#                        triangle = [int(oriented_ind)]
+#                        if oriented_ind >= 0:
+#                            opp_vert = 1
+#                        else:
+#                            opp_vert = 0
+#                        for i in range(2):
+#                            v0 = e0.vertex(opp_vert)
+#                            L = v0.valence()
+#                            prev = (v0.incident_edges().index(ind)-1)%L
+#                            ind = v0.incident_edges()[prev]
+#                            e0 = self.edge(ind)
+#                            if e0.vertex(0) == v0:
+#                                triangle.append(int(ind))
+#                                opp_vert = 1
+#                            elif e0.vertex(1) == v0:
+#                                triangle.append(~int(ind))
+#                                opp_vert = 0
+#                        v0 = e0.vertex(opp_vert)
+#                        L = v0.valence()
+#                        prev = (v0.incident_edges().index(ind)-1)%L
+#                        ind = v0.incident_edges()[prev]
+#                        assert ind == e.index()
+#                        triangles.append(triangle)
+#                        edges_used.extend(triangle)
+#            vertex_markings = {}
+#            for v in self.vertices():
+#                if v.point() in self.top_poly().postcritical_set():
+#                    vertex_markings[tuple(v.incident_edges())] = True
+#                else:
+#                    vertex_markings[tuple(v.incident_edges())] = False
+#
+#            self._combinatorial_old = CurverTriangulation(triangles,vertex_markings)
+#        return self._combinatorial_old
 
 
     def is_embedded(self):
@@ -343,29 +412,29 @@ class LiftedTriangulation(Triangulation):
 
         self._pc_triangulation = top_poly.pc_triangulation()
         self._is_lifted = True
-        self._vertices[-1] = MarkedVertex(Point(Infinity),self._pc_triangulation.vertices()[-1])
+        self._vertices[-1] = MarkedVertex(Point(Infinity), self._pc_triangulation.vertices()[-1], self._vertices[-1].index())
 
-class CurverTriangulation(CTriangulation):
-    def __init__(self,triangles,vertex_markings):
-        c_triangles = []
-        for t in triangles:
-            Ct = CTriangle([CEdge(t[i]) for i in range(len(t))])
-            c_triangles.append(Ct)
-
-
-        CTriangulation.__init__(self,c_triangles)
-
-        self._vertex_markings = dict([(v,False) for v in self.vertices])
-        for v in self.vertices:
-            for w in vertex_markings:
-                if set(w) == set([e.index for e in v]):
-                    self._vertex_markings[v] = vertex_markings[w]
-
-    def vertex_markings(self):
-        return self._vertex_markings
-
-    def is_post_critical(vertex):
-        return self.vertex_markings()[vertex]
+#class CurverTriangulation(curverTriangulation):
+#    def __init__(self,triangles,vertex_markings):
+#        c_triangles = []
+#        for t in triangles:
+#            Ct = curverTriangle([curverEdge(t[i]) for i in range(len(t))])
+#            c_triangles.append(Ct)
+#
+#
+#        curverTriangulation.__init__(self,c_triangles)
+#
+#        self._vertex_markings = dict([(v,False) for v in self.vertices])
+#        for v in self.vertices:
+#            for w in vertex_markings:
+#                if set(w) == set([e.index for e in v]):
+#                    self._vertex_markings[v] = vertex_markings[w]
+#
+#    def vertex_markings(self):
+#        return self._vertex_markings
+#
+#    def is_post_critical(self, vertex):
+#        return self.vertex_markings()[vertex]
 
 class Edge:
     def __init__(self, vertices, points, index = None):
