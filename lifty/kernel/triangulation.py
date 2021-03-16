@@ -15,7 +15,7 @@ from lifty.kernel.combinatorial_tri import *
 from lifty.kernel.errors import IntervalError, IterationError, SubdivisionError
 
 
-COLORS = ['blue','red','green','cyan','black','grey','pink','purple','orange','brown','limegreen','olive']
+COLORS = ['blue','red','green','cyan','black','pink','purple','orange','brown','limegreen','olive','yellow','lightgrey']
 
 
 
@@ -37,6 +37,16 @@ class Triangulation:
                 if v not in self._vertices:
                     v._triangulation = self
                     self._vertices.append(v)
+
+        len_pc = len(self._top_poly.postcritical_set())
+        i=len_pc
+        for v in self._vertices:
+            if v.point() in self._top_poly.postcritical_set():
+                v._index = self._top_poly.postcritical_set().index(v.point())
+            else:
+                v._index = i
+                i += 1
+        self._vertices.sort(key = lambda v: v._index)
         self._vertices.append(Vertex(Point(Infinity)))
 
         for i in range(len(self._vertices)):
@@ -69,7 +79,7 @@ class Triangulation:
                         q2.set_precision(prec)
                     else:
                         raise IntervalError('max precision reached: cyclic ordering of edges around vertex {} cannot be determined.'.format(vert_indx))
-
+        # sort the edges so they are order counter-clockwise around v.
         L.sort(key = lambda x: (x[1].cif()-p.cif()).arg())
         incident_edges = [e[0].index() for e in L]
         self.vertices()[vert_indx]._incident_edges = incident_edges
@@ -107,6 +117,9 @@ class Triangulation:
     def num_infinite_edges(self):
         return self.num_edges() - self.num_finite_edges()
 
+    def infinite_edges(self):
+        return self._edges[self.num_finite_edges():]
+
     def num_edges(self):
         return len(self._edges)
 
@@ -122,76 +135,194 @@ class Triangulation:
             inf_vert = self.vertex(-1)
             if not self.is_lifted_tri():
 
-                # for each vertex we determine if its on the boundary (since the pc_tri is convex, we just look
-                # for an angle between incident edges that is >= pi), then if it is we put the edge to infinity halfway 
-                # (in angle) between these two edges.
-                for v in verts:
+                # for each vertex v we determine if its on the boundary (since the pc_tri is convex, we just look
+                # for an angle between incident edges that is >= pi), then if it is we put an edge to infinity
+                # from that point so that the edge is parallel to one of the edges coming in to that point (unless
+                # the angle is pi, in which case it may be orthogonal to the two incoming edges). We construct the edge 
+                # this way because it contains the point (denoted s below) 2*a-a1, where a is the point at v,
+                # and a1 is the point at one of the vertices that shares an edge with v. The point s constructed this
+                # way appears to be much easier for Sage to lift via P (the topological polynomial) than some other 
+                # reasonable choices.
+
+                def on_perimeter(w):
+                    L = len(w.incident_edges())
+                    for i in range(L):
+                        E1, E2 = w.incident_edges()[i], w.incident_edges()[(i+1)%L]
+                        v1, v2 = self.edge(E1).other_vert(w), self.edge(E2).other_vert(w)
+                        angle = ((v2.point().cif() - w.point().cif())*exp(-I*(v1.point().cif() - w.point().cif()).arg())).arg()
+                        if angle.overlaps(RIF(0)) or angle < 0:
+                            return True, (w, angle, E1, E2)
+
+                # first we find a vertex on the perimeter of the finite part of the triangulation that has 
+                # angle > pi between two consecutive incident edges (note the strict inequality---we don't
+                # want the vertex we start with to be one with angle = pi incident edges).
+
+                for w in verts:
+                    boo, tup = on_perimeter(w)
+                    if boo:
+                        break
+
+                lifted_pcs_center = sum([p.cif() for p in self.top_poly().lifted_pcs()])/len(self.top_poly().lifted_pcs())
+                lifted_pcs_radius = max([abs(lifted_pcs_center-p.cif()) for p in self.top_poly().lifted_pcs()])
+
+
+    #                                                   o  s = 2a - a1
+    #                                                    \
+    #                                                     \
+    #                                                      \ e
+    #                                                       \
+    #                                                        \   ___ angle
+    #                                                          /     \
+    #                            a2              E2           | \ a   |
+    #                               o ________________________V_ o    |
+    #                                                             \ _/
+    #                                                              \
+    #                                                               \
+    #                                                                \  E1
+    #                                                                 \
+    #                                                                  \
+    #                                                                   o a1
+    #                                                                      
+    #                                ^
+                ## see diagram above |
+
+                w, angle, E1, E2 = tup
+                v1 = self.edge(E1).other_vert(w)
+                v2 = self.edge(E2).other_vert(w)
+                a1 = v1.point().alg()
+                a = w.point().alg()
+                b = a - a1
+                s = Point(a + b)
+
+                # we want s and all of its lifts via P to be outside of a circle containing all 
+                # lifts of the postcritical set. This will insure that edges to infinity of both the 
+                # post-critical triangulation and the lifted triangulation are not truncated until
+                # they are outside of this circle, and hence we do not lose any important intersection
+                # information.
+
+                def extend_edge(s, a, a1, b):
+
+                    s_lifts = self.top_poly().lifts(s)
+                    s_lifts.append(s)
+                    inside = [abs(l.cif() - lifted_pcs_center) <= lifted_pcs_radius for l in s_lifts]
+                    while any(inside):
+                        b += a - a1
+                        s = Point(a + b)
+                        s_lifts = self.top_poly().lifts(s)
+                        s_lifts.append(s)
+                        inside = [abs(l.cif() - lifted_pcs_center) <= lifted_pcs_radius for l in s_lifts]
+                    return s
+
+                s = extend_edge(s, a, a1, b)
+
+                e = Edge([w, inf_vert],[w.point(), s, inf_vert.point()])
+                self._edges.append(e)
+                e._index = self.num_edges()-1
+                L = len(w.incident_edges())
+                E1_index = w.incident_edges().index(E1)
+                w.incident_edges().insert((E1_index+1)%L,e.index())
+
+                prev_angle = angle
+                prev_b = b
+
+                v = v2
+                e1 = E2
+                e1_index = v.incident_edges().index(e1)
+                L = len(v.incident_edges())
+                e2 = v.incident_edges()[(e1_index+1)%L]
+
+                # walk counter-clockwise around the perimeter of the finite triangulation, adding infinite 
+                # edges as we go. Some vertices might appear on the perimeter more than one (e.g., for the 
+                # airplane), so we need to keep going until we see the vertex w with previous and next edges
+                # E1 and E2, resp.
+                while (v,e1) != (w,E1):
                     L = len(v.incident_edges())
                     edges_to_infty = []
+ 
 
-                    # for each i, check if the angle between incident edge i and i+1 (mod L) is >= pi
-                    for i in range(L):
-                        e1, e2 = v.incident_edges()[i], v.incident_edges()[(i+1)%L]
-                        v1, v2 = self.edge(e1).other_vert(v), self.edge(e2).other_vert(v)
-                        angle = ((v2.point().cif() - v.point().cif())*exp(-I*(v1.point().cif() - v.point().cif()).arg())).arg()
-                        
-                        # sage returns arg in the range [-pi,pi], so an angle between e1 and e2 of >= pi
-                        # corresponds here to angle <= 0 or angle = pi
-                        if angle.overlaps(RIF(pi)) or angle.overlaps(RIF(0)) or angle < 0:
-                            a1 = v1.point().alg()
-                            a2 = v2.point().alg()
-                            a = v.point().alg()
-                            if angle.overlaps(RIF(pi)):
-                                b = (a1-a).imag() - QQbar(I)*(a1-a).real()
-                            elif angle.overlaps(RIF(0)):
-                                b = -(a1-a)
-                            elif angle < 0:
-                                b = -((a2-a)/(a2-a).abs() + (a1-a)/(a1-a).abs())/2
-                            s = Point((b/b.abs()) + a)
-                            e = Edge([v, inf_vert],[v.point(), s, inf_vert.point()])
-                            self._edges.append(e)
-                            e._index = self.num_edges()-1
-                            edges_to_infty.append((e,(i+1)%L))
+                    v1, v2 = self.edge(e1).other_vert(v), self.edge(e2).other_vert(v)
+                    angle = ((v2.point().cif() - v.point().cif())*exp(-I*(v1.point().cif() - v.point().cif()).arg())).arg()
 
-                    edges_to_infty.sort(key=lambda x: x[1])
-                    edges_to_infty.reverse()
-                    for e,j in edges_to_infty:
-                        v.incident_edges().insert(j,e.index())
+                    # sage returns arg in the range [-pi,pi], so an angle between e1 and e2 of >= pi
+                    # corresponds here to angle <= 0 or angle = pi
+                    assert angle.overlaps(RIF(pi)) or angle.overlaps(RIF(0)) or angle < 0
+                    a1 = v1.point().alg()
+                    a = v.point().alg()
+                    if angle.overlaps(RIF(pi)):
+                        if prev_angle.overlaps(RIF(0)):
+                            b = (a1 - a)*I
+                        else:
+                            b = prev_b
+                    else:
+                        b = a - a1
+                    s = Point(a + b)
+
+                    s = extend_edge(s, a, a1, b)
+
+                    e = Edge([v, inf_vert],[v.point(), s, inf_vert.point()])
+                    self._edges.append(e)
+                    e._index = self.num_edges()-1
+                    v.incident_edges().insert((e1_index+1)%L,e.index())
+
+                    prev_angle = angle
+                    prev_b = b
+                    v = v2
+                    e1 = e2
+                    e1_index = v.incident_edges().index(e1)
+                    L = len(v.incident_edges())
+                    e2 = v.incident_edges()[(e1_index+1)%L]
+
+
             else:
                 pc_tri = self.top_poly().pc_triangulation()
                 pc_tri.add_edges_to_infinity()
-                F = pc_tri.num_finite_edges()
-                for v in verts:
-                    m = len(v.incident_edges())
-                    insertions = []
-                    for i in range(m):
-                        ind1, ind2 = v.incident_edges()[i], v.incident_edges()[(i+1)%m]
-                        e1, e2 = self.edge(ind1), self.edge(ind2)
-                        V = v.maps_to()
-                        IND1, IND2 = e1.maps_to(), e2.maps_to()
-                        j = V.incident_edges().index(IND1)
-                        M = len(V.incident_edges())
-                        next_edge_index = V.incident_edges()[(j+1)%M]
-                        if next_edge_index >= F:
-                            insertions.append(((i+1)%m, next_edge_index))
-                        else:
-                            assert next_edge_index == IND2
-                    insertions.sort()
-                    insertions.reverse()
-                    for i, edge_ind in insertions:
-                        new_edge = MarkedEdge([v, inf_vert],[v.point(), inf_vert.point()], edge_ind)
-                        self._edges.append(new_edge)
-                        new_edge._index = self.num_edges()-1
-                        v.incident_edges().insert(i,new_edge.index())
+                P = self.top_poly()
+                next_edge_index = self.num_edges()
+
+                vertex_pts = [v.point() for v in self.vertices()]
+                for e in pc_tri.infinite_edges():
+                    lifts = P.lift_edge(e)
+                    print('edge {} lifted.'.format(e.index()))
+                    for lift in lifts:
+                        j = vertex_pts.index(lift[0])
+                        v,w = self.vertices()[j], self.vertices()[-1]
+                        edge = MarkedEdge([v,w],lift,e.index(),next_edge_index)
+                        self._edges.append(edge)
+                        next_edge_index += 1
+                for i in range(len(self.finite_vertices())):
+                    self.set_incident_edges(i)
+#               F = pc_tri.num_finite_edges()
+#               for v in verts:
+#                   m = len(v.incident_edges())
+#                   insertions = []
+#                   for i in range(m):
+#                       ind1, ind2 = v.incident_edges()[i], v.incident_edges()[(i+1)%m]
+#                       e1, e2 = self.edge(ind1), self.edge(ind2)
+#                       V = v.maps_to()
+#                       IND1, IND2 = e1.maps_to(), e2.maps_to()
+#                       j = V.incident_edges().index(IND1)
+#                       M = len(V.incident_edges())
+#                       next_edge_index = V.incident_edges()[(j+1)%M]
+#                       if next_edge_index >= F:
+#                           insertions.append(((i+1)%m, next_edge_index))
+#                       else:
+#                           assert next_edge_index == IND2
+#                   insertions.sort()
+#                   insertions.reverse()
+#                   for i, edge_ind in insertions:
+#                       new_edge = MarkedEdge([v, inf_vert],[v.point(), inf_vert.point()], edge_ind)
+#                       self._edges.append(new_edge)
+#                       new_edge._index = self.num_edges()-1
+#                       v.incident_edges().insert(i,new_edge.index())
 
             E = self.edge(self.num_finite_edges())
             inf_edges_ordered = [E.index()]
             v = E.vert(0)
             while len(inf_edges_ordered) < self.num_infinite_edges():
-                next_index = (v.incident_edges().index(E.index()) + 1)%(v.valence())
+                next_index = (v.incident_edges().index(E.index()) + 1)%(v.degree())
                 e = self.edge(v.incident_edges()[next_index])
                 v = e.other_vert(v)
-                next_index = (v.incident_edges().index(e.index()) + 1)%(v.valence())
+                next_index = (v.incident_edges().index(e.index()) + 1)%(v.degree())
                 E = self.edge(v.incident_edges()[next_index])
                 inf_edges_ordered.append(E.index())
             inf_edges_ordered.reverse()
@@ -220,49 +351,72 @@ class Triangulation:
             triangles = []
             edges = {}
             c_vertices = [CVertex(i) for i in range(len(self.vertices()))]
+
+            # start with an edge, then build the triangles adjacent to the positive and negative reps
+            # of the edge, but only if the triangle hasn't already been built (i.e., if the label does
+            # not already appear as a key in the dictionary edges)
             for e in self.edges():
                 for label in [int(e.index()), ~int(e.index())]:
                     if label not in edges:
                         e0 = e
                         ind = e.index()
 
+                        # record the sign of the label, and the e-index (next_vert) of vertex at the forward end
+                        # of e w.r.t. counter-clock-wise travel around the perimeter of the triangle
                         if label >= 0:
-                            opp_vert = 1
+                            next_vert = 1
                             tri_signs = [1]
                         else:
-                            opp_vert = 0
+                            next_vert = 0
                             tri_signs = [-1]                        
 
+                        # if the opposite sign label (~label) is already in edges, then we don't want to create a new edge,
+                        # but rather just point label to the edge that ~label points to.
                         if ~label not in edges:
                             edges[label] = CEdge(ind,[c_vertices[e0.vertex(0).index()], c_vertices[e0.vertex(1).index()]])
                         else:
                             edges[label] = edges[~label]
+
+                        # initiate a list of edges for the triangle with the edge e
                         tri_edges = [edges[label]]
 
                         for i in range(2):
-                            v0 = e0.vertex(opp_vert)
-                            L = v0.valence()
-                            prev = (v0.incident_edges().index(ind)-1)%L
+
+                            # get the Vertex associated to the e-index next_vert
+                            v0 = e0.vertex(next_vert)
+                            d = v0.degree()
+
+                            # get the edge incident on v0 that comes before e0 in the clockwise ordering of 
+                            # edges around v0. This will be the next edge of the triangle after e0 as we traverse
+                            # the boundary of the triangle counter-clock-wise.
+                            prev = (v0.incident_edges().index(ind)-1)%d
+
+                            # get the index of the edge, then the actual Edge object
                             ind = v0.incident_edges()[prev]
                             e0 = self.edge(ind)
+
+                            # get the sign of this edge, and the next vertex
                             if e0.vertex(0) == v0:
                                 label = ind
-                                opp_vert = 1
+                                next_vert = 1
                                 tri_signs.append(1)
                             elif e0.vertex(1) == v0:
                                 label = ~int(ind)
-                                opp_vert = 0
+                                next_vert = 0
                                 tri_signs.append(-1)
 
+                            # create the CEdge if we haven't already created it with ~label
                             if ~label not in edges:
                                 edges[label] = CEdge(ind,[c_vertices[e0.vertex(0).index()], c_vertices[e0.vertex(1).index()]])
                             else:
                                 edges[label] = edges[~label]
                             tri_edges.append(edges[label])
 
-                        v0 = e0.vertex(opp_vert)
-                        L = v0.valence()
-                        prev = (v0.incident_edges().index(ind)-1)%L
+                        #get the next verted, then get the incident edge that will should correspond to the
+                        # edge we started with
+                        v0 = e0.vertex(next_vert)
+                        d = v0.degree()
+                        prev = (v0.incident_edges().index(ind)-1)%d
                         ind = v0.incident_edges()[prev]
                         assert ind == e.index()
                         triangle = CTriangle(tri_edges, tri_signs)
@@ -276,9 +430,34 @@ class Triangulation:
                     vertex_markings[i] = [False, False]
                 if  v.point().is_infinity():
                     vertex_markings[i][1] = True
+            if self.is_lifted_tri():
+                vertex_mappings = [v.maps_to().index() for v in self.vertices()]
+            else:
+                edge_mappings = None
+                vertex_mappings = None
+            self._combinatorial = CTriangulation(triangles, c_vertices, vertex_markings, vertex_mappings, self.is_lifted_tri())
+        
+        # encode the edges of the postcritical triangulation as a multi-arc in this combinatorial triangulation
+        if self._is_lifted:
+            pc_tri = self._pc_triangulation
+            arcs = []
+            for e in pc_tri.edges():
+                assert e.num_segments() == 1
+                vertices = [None,None]
+                for i in range(2):
+                    a = e.vertex(i).point().alg()
+                    for j in range(self.num_vertices()):
+                        v = self.vertex(j)
+                        if a == v.point().alg():
+                            vertices[i] = j
+                e_seg = e.segment(0)
+                arc_vector = [lifted_edge.geom_intersection(e) for lifted_edge in self.edges()]
+                arc = Arc(self._combinatorial, vertices, arc_vector)
+                arcs.append(arc)
+            multi_arc = MultiArc(arcs)
 
+        self._combinatorial._multi_arcs['pc_tri'] = multi_arc
 
-            self._combinatorial = CTriangulation(triangles, c_vertices, vertex_markings)
         return self._combinatorial
 
 #    def combinatorial_old(self):
@@ -375,27 +554,62 @@ class Triangulation:
         return self._is_lifted
 
 
-    def plot(self, thickness=.7, DPI=400, aspect_ratio='automatic',show_vertices=True):
+    def plot(self, thickness=.7, DPI=400, aspect_ratio=1,show_vertices=True, arrow_size=.03, point_size=1, show_pc_tri=False, show_axes=False):
         G = Graphics()
         lines = []
+        labels = []
         for i in range(self.num_edges()):
             edge = self.edge(i)
             points = edge.finite_points()
+
+            edge_length = sum([seg.length() for seg in edge.segments()])
+            seg_ind = 0
+            L = edge.segment(seg_ind).length()
+            while L < edge_length/2:
+                seg_ind += 1
+                L += edge.segment(seg_ind).length()
+            seg = edge.segment(seg_ind)
+            a = seg.endpoint(0).cif()
+            b = seg.endpoint(1).cif()
+            c = (a + b)/2
+            a1 = (2*(b - c)/seg.length())*arrow_size*(exp(5*pi*I/6)) + c
+            a2 = (2*(b - c)/seg.length())*arrow_size*(exp(-5*pi*I/6)) + c
+            l = (2*(b - c)/seg.length())*1.5*arrow_size*(exp(pi*I/3)) + c
+
+
+
             ### for some reason Sage will not plot a line if its endpoints are elements of the ComplexIntervalField
             ### with imaginary part =0. So, as a somewhat hacky workaround we'll just add a very small multiple of I
             ### to each point.
             eps = CIF(0.00000000001*I)
             if self.is_lifted_tri():
                 lines.append(Line([points[j].cif()+eps for j in range(len(points))], color=COLORS[edge.maps_to()], thickness=thickness, zorder=20))
+                
+                lines.append(Line([c,a1], color=COLORS[edge.maps_to()], thickness=thickness, zorder=20))
+                lines.append(Line([c,a2], color=COLORS[edge.maps_to()], thickness=thickness, zorder=20))
+                labels.append(Text(str(edge.index()),l, color=COLORS[edge.maps_to()], fontsize=6, zorder=20))                
+                
+                if show_pc_tri:
+                    T = self.top_poly().pc_triangulation()
+                    for i in range(T.num_edges()):
+                        edge = T.edge(i)
+                        points = edge.finite_points()
+                        color = COLORS[i%12]
+                        lines.append(Line([points[j].cif()+eps for j in range(len(points))], color=color, thickness=thickness*2, alpha=.5, zorder=15))
             else:
                 f = self.num_finite_edges()
-                if i < f:
-                    color = COLORS[i%12]
-                else:
-                    color = COLORS[f]
+                color = COLORS[i%12]
+
+                lines.append(Line([c,a1], color=color, thickness=thickness, zorder=20))
+                lines.append(Line([c,a2], color=color, thickness=thickness, zorder=20))
+                labels.append(Text(str(edge.index()),l, color=color, fontsize=6, zorder=20))                
+
                 lines.append(Line([points[j].cif()+eps for j in range(len(points))], color=color, thickness=thickness, zorder=20))
+
         for L in lines:
             G += L
+        for T in labels:
+            G += T
         if show_vertices:
             for v in self.finite_vertices():
                 color = 'black'
@@ -403,8 +617,12 @@ class Triangulation:
                     if v.point().cif().overlaps(c.cif()):
                         color = 'red'
                         break
-                G += Pt(v.point().cif(), color=color, zorder=30)
-        G.show(dpi=DPI, aspect_ratio=aspect_ratio)
+                p = (v.point().cif().real(), v.point().cif().imag())
+                G += Disk(p, point_size*.03, (0,2*pi),  color='white', zorder=30)
+                G += Disk(p, point_size*.03, (0,2*pi),  color=color, fill=False, thickness=thickness, zorder=35)
+                G += Text(str(v.index()), p,  color=color, fontsize=5, zorder=35, vertical_alignment='center', horizontal_alignment='center')
+
+        G.show(dpi=DPI, aspect_ratio=aspect_ratio, axes=show_axes)
 
 class LiftedTriangulation(Triangulation):
     def __init__(self, marked_edges, top_poly):
@@ -446,7 +664,7 @@ class Edge:
         else:
             self._finite_points = points
             self._ray = None
-        self._segments = [Segment([self._finite_points[i],self._finite_points[i+1]], self) for i in range(len(self._finite_points)-1)]
+        self._segments = tuple([Segment([self._finite_points[i],self._finite_points[i+1]], self) for i in range(len(self._finite_points)-1)])
         self._index = index
         self._triangulation = None
 
@@ -491,6 +709,63 @@ class Edge:
         self._segments.insert(seg_indx+1, Segment([subdivision_point, self.segment(seg_indx).endpoint(1)], self))
 
         self._points.insert(seg_indx+1, subdivision_point)
+
+    def geom_intersection(self,other):
+        # we will assume that other is an edge that consists of a single segment, since that's all we
+        # need for now.
+
+        assert other.num_segments() == 1
+
+        other_seg = other.segment(0)
+        alg_intersection = int(0)
+
+        segment_list = list(self.segments())
+
+        # segment_list[0] should not have its initial point on other_seg, and segment_list[-1] should not have 
+        # its terminal point on other_seg. We iteratively remove segments from the front and back of segment_list
+        # until this condition is satisfied. Once we have done this, we can determine the *twice* the algebraic intersection
+        # number of self with other_seg by adding up intersections of individual segments, where the intersection
+        # is +/- 2 if a segment is transverse to other_seg, and is +/- 1 if it has one endpoint on other_seg and 
+        # the other one not on other_seg. The sign is determined by orientations. We compute twice the algebraic
+        # intersection number to stay within the integers during the computations---we divide by 2 at the end 
+        #to get the actual algebraic intersection number.
+
+        while other_seg.on_seg(segment_list[0].endpoint(0)):
+            _ = segment_list.pop(0)
+            if len(segment_list) == 0:
+                return 0
+
+        while other_seg.on_seg(segment_list[-1].endpoint(1)):
+            _ = segment_list.pop(-1)
+            if len(segment_list) == 0:
+                return 0
+
+        for seg in segment_list:
+            if other_seg.on_seg(seg.endpoint(0)):
+                if other_seg.below_seg(seg.endpoint(1)):
+                    alg_intersection -= 1
+                elif other_seg.above_seg(seg.endpoint(1)):
+                    alg_intersection += 1
+            elif other_seg.below_seg(seg.endpoint(0)):
+                if other_seg.on_seg(seg.endpoint(1)):
+                    alg_intersection += 1
+                elif other_seg.above_seg(seg.endpoint(1)):
+                    if other_seg.transverse_to(seg):
+                        alg_intersection += 2
+            elif other_seg.above_seg(seg.endpoint(0)):
+                if other_seg.on_seg(seg.endpoint(1)):
+                    alg_intersection -= 1
+                elif other_seg.below_seg(seg.endpoint(1)):
+                    if other_seg.transverse_to(seg):
+                        alg_intersection -= 2
+
+        geom_int = abs(alg_intersection/2)
+        assert geom_int == int(geom_int)
+
+        return int(geom_int)
+
+
+
 
 
 class MarkedEdge(Edge):
@@ -538,7 +813,7 @@ class Segment:
     def endpoint(self,i):
         return self._endpoints[i]
 
-    def slope(self): ## return an RIF, not a algebraic integer
+    def slope(self): ## return an RIF, not an algebraic integer
         a,b = self.endpoint(0).cif(), self.endpoint(1).cif()
         if self._slope == None:
             if a.real().overlaps(b.real()):
@@ -547,13 +822,15 @@ class Segment:
                 self._slope = (a.imag() - b.imag())/(a.real() - b.real())
         return self._slope
 
-    def y_intercept(self): ## return an RIF, not a algebraic integer
+    def y_intercept(self): ## return an RIF, not an algebraic integer
         if self.slope() != Infinity:
             return -self.slope()*self.endpoint(0).cif().real() + self.endpoint(0).cif().imag()
         else:
             return None
 
     def transverse_to(self, other):
+        '''Return True if self has nontrivial transverse intersection with other.
+        '''
         a, b = self.endpoint(0), self.endpoint(1)
         c, d = other._endpoints[0], other._endpoints[1]
         if ( self.above_seg(c) and self.below_seg(d) ) or (self.above_seg(d) and self.below_seg(c) ):
@@ -600,6 +877,9 @@ class Segment:
         return False
 
     def on_seg(self, point):
+        '''Return True if point lies on this segment (note it must lie on the segment, not just
+            the line that segment is contained in.)
+        '''
         a,b,c = self.endpoint(0).cif(), self.endpoint(1).cif(), point.cif()
         s = self.slope()
         if self.slope() == Infinity:
@@ -615,6 +895,9 @@ class Segment:
                 if c.real().overlaps(a.real().union(b.real())):
                     return True
         return False
+
+    def length(self):
+        return abs(self.endpoint(0).cif() - self.endpoint(1).cif())
 
 
 class Vertex:
@@ -634,7 +917,7 @@ class Vertex:
     def index(self):
         return self._index
 
-    def valence(self):
+    def degree(self):
         return len(self.incident_edges())
 
     def incident_edges(self):
@@ -645,6 +928,9 @@ class Vertex:
 
     def __ne__(self,other):
         return self.point() != other.point()
+
+    def __repr__(self):
+        return self.point().__repr__()
 
 class MarkedVertex(Vertex):
     def __init__(self, point, maps_to, index=None, incident_edges=[]):

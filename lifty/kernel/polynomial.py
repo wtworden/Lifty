@@ -137,15 +137,16 @@ class TopPoly:
             postcritical = list(set([pcp for c in C for pcp in PCS[c]]))
             pcs = [Point(p) for p in postcritical]
 
+            pcs.sort(key = lambda x: x.cif().real())
 
             # check that the intervals for points in the postcritical set are all disjoint. If not, increase precision.
             make_intervals_disjoint(pcs, self.max_precision())
-            self._postcritical_set = pcs
+            self._postcritical_set = tuple(pcs)
         return self._postcritical_set
 
 
     def pc_triangulation(self):
-        """Return a triangulation whose vertices are the postcritical set. This will always be a 
+        """Return a triangulation whose vertices are the postcritical set. This will always be a piecewise
             linear triangulation (each edge is a single line segment). Note that at this point 
             we don't include edges with endpoints at infinity. Results are cached.
         """
@@ -290,6 +291,7 @@ class TopPoly:
         Q = self.derivative()
         a,b = edge.point(0), edge.point(1)
         a_lifts, b_lifts = self.lifts(a), self.lifts(b)
+        #print(a_lifts,b_lifts)
         make_intervals_disjoint(a_lifts, self.max_precision())
         make_intervals_disjoint(b_lifts, self.max_precision())
         
@@ -301,6 +303,7 @@ class TopPoly:
         ## from A is the number of lifts of c that are D-close to A.
         t = QQbar(1)/100000
         def init_edge(t, lifted_edges):
+            #print('entering init_edge')
             c = Point(b.alg()*t + (1-t)*a.alg())
             c_lifts = self.lifts(c)
             for A in a_lifts:
@@ -319,6 +322,7 @@ class TopPoly:
         ## we extend the lift of each edge one segment at a time, until we have the full lift. Each
         ## iteration of below function extends by one segment. 
         def extend_edges(t, dt, interval, lifted_edges, finished):
+            #print('entering extend_edges')
             s1 = Point(b.alg()*t + (1-t)*a.alg())
             s2 = Point(b.alg()*(t+dt)+(1-(t+dt))*a.alg())
             lifted_segs = []
@@ -420,6 +424,7 @@ class TopPoly:
                 for P in p_lifts:
                     vertices.append(MarkedVertex(P,v))
 
+
             vertex_pts = [v.point() for v in vertices]
             for i in range(T.num_finite_edges()):
                 e = T.edge(i)
@@ -432,6 +437,7 @@ class TopPoly:
                     subvertices += points[1:-1]
                     edge = MarkedEdge([v,w],points, i, None)
                     all_edges.append(edge)
+
 
             # set indices so they agree with the order in which edges are listed.
             for i in range(len(all_edges)):
