@@ -711,8 +711,34 @@ class Edge:
         self._points.insert(seg_indx+1, subdivision_point)
 
     def geom_intersection(self,other):
+        # we define the geometric intersection number as the absolute value of the algebraic intersection
+        # number. We define the algebraic intersection number as follows: for each transverse intersection 
+        # of self with other of the form shown, add +/- 1 as shown:
+
+        #                                        self
+        #                          ^    +1         |     -1
+        #                          |               |
+        #              other o-----|-------->------|---------o
+        #                          |               |
+        #                          |               v                   
+        #                        self
+        #
+        # If a vertex of self lies on the interior of other, then we add +/- 1/2 as shown:
+
+        #             self         self        other o------o-->---------o-------o
+        #               |           |                       |            |    
+        #               |           |                       |  +1/2      |  -1/2      
+        #               ^           v                       ^            v        
+        #          +1/2 |      -1/2 |                       |            |           
+        #               |           |                       |            |          
+        #   other o-----o-->--------o-----o                self         self                           
+        #
+        # In the case where self is an edge of the lifted triangulation, and other is an edge of the
+        # pc triangulation (which is the case we care about), it cannot happen that a vertex of other lies
+        # in the interior of self, so we don't need to worry about that case.
+
         # we will assume that other is an edge that consists of a single segment, since that's all we
-        # need for now.
+        # need for now (all edges of the pc triangulation consist of a single segment).
 
         assert other.num_segments() == 1
 
@@ -721,24 +747,28 @@ class Edge:
 
         segment_list = list(self.segments())
 
-        # segment_list[0] should not have its initial point on other_seg, and segment_list[-1] should not have 
-        # its terminal point on other_seg. We iteratively remove segments from the front and back of segment_list
-        # until this condition is satisfied. Once we have done this, we can determine the *twice* the algebraic intersection
-        # number of self with other_seg by adding up intersections of individual segments, where the intersection
-        # is +/- 2 if a segment is transverse to other_seg, and is +/- 1 if it has one endpoint on other_seg and 
-        # the other one not on other_seg. The sign is determined by orientations. We compute twice the algebraic
-        # intersection number to stay within the integers during the computations---we divide by 2 at the end 
-        #to get the actual algebraic intersection number.
+        # if segment_list[0] has its initial point at a vertex of other, then we iteratively remove segments 
+        # from the beginning of segment_list until segment_list[0] has its initial point disjoint from other.
+        # Similarly if segment_list[-1] has its terminal point at a vertex of other, then we iteratively remove
+        # segments from the end of segment_list until segment_list[-1] has its terminal vertex disjoint from
+        # other.
 
-        while other_seg.on_seg(segment_list[0].endpoint(0)):
-            _ = segment_list.pop(0)
-            if len(segment_list) == 0:
-                return 0
+        # Once we have adjusted segment_list as described above, we can determine the algebraic intersection
+        # number of self with other by adding up intersection numbers of individual segments of self. 
 
-        while other_seg.on_seg(segment_list[-1].endpoint(1)):
-            _ = segment_list.pop(-1)
-            if len(segment_list) == 0:
-                return 0
+        if segment_list[0].endpoint(0) == other.point(0) or segment_list[0].endpoint(0) == other.point(1):
+            while other_seg.on_seg(segment_list[0].endpoint(0)):
+                _ = segment_list.pop(0)
+                if len(segment_list) == 0:
+                    return 0
+
+        if segment_list[-1].endpoint(1) == other.point(0) or segment_list[-1].endpoint(1) == other.point(1):
+            while other_seg.on_seg(segment_list[-1].endpoint(1)):
+                _ = segment_list.pop(-1)
+                if len(segment_list) == 0:
+                    return 0
+
+
 
         for seg in segment_list:
             if other_seg.on_seg(seg.endpoint(0)):
@@ -973,7 +1003,7 @@ class Point:
         return self.cif().overlaps(other.cif())
 
     def __eq__(self,other):
-        return type(self) == type(other) and self.cif().overlaps(other.cif())
+        return type(self) == type(other) and self.overlaps(other)
 
     def __ne__(self,other):
         return not self.__eq__(other) 
