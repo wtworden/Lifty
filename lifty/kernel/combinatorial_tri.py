@@ -314,8 +314,9 @@ class CVertex():
         return str((self.incident_edges(), self.is_postcritical()))
 
 class Arc():
-    def __init__(self, Ctriangulation, vertices, edge_intersections):
-        self._vector = tuple(edge_intersections)
+    def __init__(self, Ctriangulation, vertices, alg_edge_intersections, geom_edge_intersections):
+        self._algebraic = tuple(alg_edge_intersections)
+        self._geometric = tuple(geom_edge_intersections)
         self._vertices = tuple(vertices)
         self._triangulation = Ctriangulation
 
@@ -328,8 +329,11 @@ class Arc():
     def edge_weight(self,edge_index):
         return self._vector[edge_index]
 
-    def vector(self):
-        return self._vector
+    def algebraic(self):
+        return self._algebraic
+
+    def geometric(self):
+        return self._geometric
 
     def __repr__(self):
         return 'arc with vertices: [{}, {}], intersections: {}'.format(self.vertex(0), self.vertex(1), self.vector())

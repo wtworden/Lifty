@@ -67,22 +67,36 @@ class Triangulation:
 
         if len(L) > 1:
             # make sure the ordering of segments coming from v can be determined using intervals.
-            for j in range(len(L)):
-                q1, q2 = L[j][1], L[(j+1)%(len(L))][1]
-                prec = max([q1.precision(), q2.precision()])
-                arg1 = (q1.cif() - p.cif()).arg()
-                arg2 = (q2.cif() - p.cif()).arg()
-                while arg1.overlaps(arg2):
-                    prec = 2*prec
-                    if prec < self.top_poly().max_precision():
-                        q1.set_precision(prec)
-                        q2.set_precision(prec)
-                    else:
-                        raise IntervalError('max precision reached: cyclic ordering of edges around vertex {} cannot be determined.'.format(vert_indx))
+            for i in range(len(L)-1):
+                for j in range(i+1,len(L)):
+                    q1, q2 = L[i][1], L[j][1]
+                    prec = max([q1.precision(), q2.precision()])
+                    arg1 = (q1.cif() - p.cif()).arg()
+                    arg2 = (q2.cif() - p.cif()).arg()
+                    while arg1.overlaps(arg2):
+                        prec = 2*prec
+                        if prec < self.top_poly().max_precision():
+                            q1.set_precision(prec)
+                            q2.set_precision(prec)
+                        else:
+                            raise IntervalError('max precision reached: cyclic ordering of edges around vertex {} cannot be determined.'.format(vert_indx))
         # sort the edges so they are order counter-clockwise around v.
         L.sort(key = lambda x: (x[1].cif()-p.cif()).arg())
         incident_edges = [e[0].index() for e in L]
         self.vertices()[vert_indx]._incident_edges = incident_edges
+
+    def min_vertex_angle(self):
+        min_angle = 2*pi
+        for v in self.vertices():
+            p = v.point()
+            incident = v.incident_edges()
+            for i in range(len(incident)):
+                e1, e2 = self.edge(incident[i]), self.edge(incident[(i+1)%len(incident)])
+                p1 = e1.point(1) if p == e1.point(0) else e1.point(-2)
+                p2 = e2.point(1) if p == e2.point(0) else e2.point(-2)
+                angle = abs((p1.cif() - p.cif()).arg() - (p2.cif() - p.cif()).arg())
+                min_angle = min(min_angle, angle)
+        return min_angle
 
     def top_poly(self):
         return self._top_poly
@@ -286,6 +300,8 @@ class Triangulation:
                     for lift in lifts:
                         j = vertex_pts.index(lift[0])
                         v,w = self.vertices()[j], self.vertices()[-1]
+                        lift[0] = v.point()
+                        lift[-1] = w.point()
                         edge = MarkedEdge([v,w],lift,e.index(),next_edge_index)
                         self._edges.append(edge)
                         next_edge_index += 1
@@ -441,18 +457,109 @@ class Triangulation:
         if self._is_lifted:
             pc_tri = self._pc_triangulation
             arcs = []
-            for e in pc_tri.edges():
-                assert e.num_segments() == 1
-                vertices = [None,None]
+            self_copy = deepcopy(self)
+            eps = 10^(-int(-log(min([seg.length() for edge in self_copy.edges() for seg in edge.segments()]).center()/1000,10)))
+            min_angle = self_copy.min_vertex_angle()
+            vertices = [[None,None] for i in range(pc_tri.num_edges())]
+            for pc_edge in pc_tri.edges():
+                assert pc_edge.num_segments() == 1
                 for i in range(2):
-                    a = e.vertex(i).point().alg()
+                    a = pc_edge.vertex(i).point().alg()
                     for j in range(self.num_vertices()):
                         v = self.vertex(j)
                         if a == v.point().alg():
-                            vertices[i] = j
-                e_seg = e.segment(0)
-                arc_vector = [lifted_edge.geom_intersection(e) for lifted_edge in self.edges()]
-                arc = Arc(self._combinatorial, vertices, arc_vector)
+                            vertices[pc_edge.index()][i] = j
+                pc_edge_seg = pc_edge.segment(0)
+
+                # first we'll make self_copy transverse to pc_edge, in such a way that every segment of self_copy
+                # is transverse to pc_edge (i.e., no endpoint of a segment lies on pc_edge, except of course at
+                # the vertices of pc_edge).
+
+
+                for e in self_copy.edges():
+                    for i in range(len(e.points())):
+                        p = e.point(i)
+                        # if p in on pc_edge but is not at one of its vertices...
+                        if pc_edge_seg.on_seg(p) and ( p==pc_edge.vertex(0).point() or p==pc_edge.vertex(1).point() ):
+
+                            # push p off of pc_edge_seg to the left (relative to orientation of pc_edge_seg) by eps. By
+                            # definition eps is about .001 times the length of the sortest segment of self_copy,
+                            # so the amount we push off is small compared to the length of any segment, but large
+                            # compared to the precisions of intervals (which is less than .000001 times the length
+                            # of the shortest segment). Before we do the pushoff, we need to make sure eps is small
+                            # enough so that we stay away from the other edges of pc_tri. This can be done by
+                            # considering the smallest angle min_angle of pc_tri, and ensuring that eps < x*tan(min_angle)/2,
+                            # where x in the mininal distance from p to a vertex of pc_edge.
+
+                            x = min([abs(p.cif() - pc_edge.vertex(0).point().cif()), abs(p.cif() - pc_edge.vertex(1).point().cif())])
+                            y = x*tan(min_angle)/2
+                            eps0 = eps
+                            while eps0 > y:
+                                eps0 = eps0/10
+                                prec = min([point.precision() for edge in self_copy.edges() for point in edge.points()])
+                                if eps0 < 1000*(10^(-prec*log(2,10)))
+                                    if prec < self.top_poly().max_precision():
+                                        prec = prec*2
+                                        for point in [point for edge in self_copy.edges() for point in edge.points()]:
+                                            point.set_precision(prec)
+                                    else:
+                                        raise IntervalError('max precision reached: when trying to compute combinatorial triangulation')
+                            
+                            p._set_alg(p.alg()+eps0*e_seg.unit_tangent()*QQbar(I))
+
+            alg_intersections_lists = []
+            alg_arcs = [[0 for i in range(self_copy.num_edges())] for j in range(pc_tri.num_edges())]
+            geom_arcs = [[0 for i in range(self_copy.num_edges())] for j in range(pc_tri.num_edges())]
+            for lifted_edge in self_copy.edges():
+                alg_intersections = []
+                for i in range(len(lifted_edge.segments())):
+                    seg = lefted_edge.segment(i)
+                    for e in pc_tri.edges():
+                        if seg.transverse_to(e.segment()):
+                            a,b = seg.endpoint(0).cif(), seg.endpoint(1).cif()
+                            c,d = e.segment().endpoint(0).cif(), e.segment().endpoint(1).cif()
+                            # first translate by c to get c==0
+                            a,b = a-c, b-c
+                            c,d = c-c, d-c
+                            # now rotate so that c----d has slope 1
+                            z = exp(I*(pi/4 - d.arg()))
+                            a,b = a*z, b*z
+                            # seg is now parametrized by P+tv, with P=a and v=b-a.
+                            v = b-a
+                            P = a
+                            # the parameter t at the intersection point is:
+                            t = (P.imag()-P.real())/(v.real() - v.imag())
+                            alg_int = 2*int((d.real()*(b-a).imag() - (b-a).real()*d.imag()) > 0) - 1
+                            alg_intersections.append((i+t,alg_int,e.index()))
+                alg_intersections.sort(key=lambda x:x[0])
+                # now that the intersections are in order, we don't need the t+i parameter
+                alg_ints_tuples = [(tup[1],tup[2]) for tup in alg_intersections]
+                # now look for consecutive intersections through the same edge, and remove them recursively
+                # until all are gone (these correspond to bigons)
+                def has_bigons(alg_ints_tuples):
+                    for i in range(len(alg_ints_tuples)-1):
+                        for j in range(i+1,alg_ints_tuples):
+                            if alg_ints_tuples[i][1] == alg_int_tuples[j][1]:
+                                return True, alg_ints_tuples, (i,j)
+                    return False, alg_ints_tuples
+                bigons, alg_ints_tuples, (i,j) = has_bigons(alg_ints_tuples)
+                while bigons:
+                    _ = alg_ints_tuples.pop(j)
+                    _ = alg_ints_tuples.pop(i)
+                    bigons, alg_ints_tuples, (i,j) = has_bigons(alg_ints_tuples)
+
+                alg_intersections_list.append(tuple(alg_intersections))
+                for tup in alg_ints_tuples:
+                    i = tup[1]
+                    alg_arcs[i][lifted_edge.index()] += tup[0]
+                    geom_arcs[i][lifted_edge.index()] += abs(tup[0])
+
+            arcs = []
+            for i in range(pc_tri.num_edges()):
+                alg_arc = alg_arcs[i]
+                geom_arc = geom_arcs[i]
+
+                arc = Arc(self._combinatorial, vertices, alg_arc_vector, geom_arc_vector)
                 arcs.append(arc)
             multi_arc = MultiArc(arcs)
 
@@ -658,6 +765,9 @@ class Edge:
     def __init__(self, vertices, points, index = None):
         self._vertices = vertices
         self._points = points
+        assert self._points[0] == self._vertices[0].point()
+        assert self._points[-1] == self._vertices[1].point()
+
         if points[-1].alg() == Infinity:
             self._finite_points = points[:-1]
             self._ray = Ray([points[-2], points[-1]], self)
@@ -710,93 +820,92 @@ class Edge:
 
         self._points.insert(seg_indx+1, subdivision_point)
 
-    def geom_intersection(self,other):
-        # we define the geometric intersection number as the absolute value of the algebraic intersection
-        # number. We define the algebraic intersection number as follows: for each transverse intersection 
-        # of self with other of the form shown, add +/- 1 as shown:
-
-        #                                        self
-        #                          ^    +1         |     -1
-        #                          |               |
-        #              other o-----|-------->------|---------o
-        #                          |               |
-        #                          |               v                   
-        #                        self
-        #
-        # If a vertex of self lies on the interior of other, then we add +/- 1/2 as shown:
-
-        #             self         self        other o------o-->---------o-------o
-        #               |           |                       |            |    
-        #               |           |                       |  +1/2      |  -1/2      
-        #               ^           v                       ^            v        
-        #          +1/2 |      -1/2 |                       |            |           
-        #               |           |                       |            |          
-        #   other o-----o-->--------o-----o                self         self                           
-        #
-        # In the case where self is an edge of the lifted triangulation, and other is an edge of the
-        # pc triangulation (which is the case we care about), it cannot happen that a vertex of other lies
-        # in the interior of self, so we don't need to worry about that case.
-
-        # we will assume that other is an edge that consists of a single segment, since that's all we
-        # need for now (all edges of the pc triangulation consist of a single segment).
-
-        assert other.num_segments() == 1
-
-        other_seg = other.segment(0)
-        alg_intersection = int(0)
-
-        segment_list = list(self.segments())
-
-        # if segment_list[0] has its initial point at a vertex of other, then we iteratively remove segments 
-        # from the beginning of segment_list until segment_list[0] has its initial point disjoint from other.
-        # Similarly if segment_list[-1] has its terminal point at a vertex of other, then we iteratively remove
-        # segments from the end of segment_list until segment_list[-1] has its terminal vertex disjoint from
-        # other.
-
-        # Once we have adjusted segment_list as described above, we can determine the algebraic intersection
-        # number of self with other by adding up intersection numbers of individual segments of self. 
-
-        if segment_list[0].endpoint(0) == other.point(0) or segment_list[0].endpoint(0) == other.point(1):
-            while other_seg.on_seg(segment_list[0].endpoint(0)):
-                _ = segment_list.pop(0)
-                if len(segment_list) == 0:
-                    return 0
-
-        if segment_list[-1].endpoint(1) == other.point(0) or segment_list[-1].endpoint(1) == other.point(1):
-            while other_seg.on_seg(segment_list[-1].endpoint(1)):
-                _ = segment_list.pop(-1)
-                if len(segment_list) == 0:
-                    return 0
-
-
-
-        for seg in segment_list:
-            if other_seg.on_seg(seg.endpoint(0)):
-                if other_seg.below_seg(seg.endpoint(1)):
-                    alg_intersection -= 1
-                elif other_seg.above_seg(seg.endpoint(1)):
-                    alg_intersection += 1
-            elif other_seg.below_seg(seg.endpoint(0)):
-                if other_seg.on_seg(seg.endpoint(1)):
-                    alg_intersection += 1
-                elif other_seg.above_seg(seg.endpoint(1)):
-                    if other_seg.transverse_to(seg):
-                        alg_intersection += 2
-            elif other_seg.above_seg(seg.endpoint(0)):
-                if other_seg.on_seg(seg.endpoint(1)):
-                    alg_intersection -= 1
-                elif other_seg.below_seg(seg.endpoint(1)):
-                    if other_seg.transverse_to(seg):
-                        alg_intersection -= 2
-
-        geom_int = abs(alg_intersection/2)
-        assert geom_int == int(geom_int)
-
-        return int(geom_int)
-
-
-
-
+#    def alg_intersection(self,other):
+#        # We define the algebraic intersection number as follows: for each transverse intersection 
+#        # of self with other of the form shown, add +/- 1 as shown:
+#
+#        #                                        self
+#        #                          ^    +1         |     -1
+#        #                          |               |
+#        #              other o-----|-------->------|---------o
+#        #                          |               |
+#        #                          |               v                   
+#        #                        self
+#        #
+#        # If a vertex of self lies on the interior of other, then we add +/- 1/2 as shown:
+#
+#        #             self         self        other o------o-->---------o-------o
+#        #               |           |                       |            |    
+#        #               |           |                       |  +1/2      |  -1/2      
+#        #               ^           v                       ^            v        
+#        #          +1/2 |      -1/2 |                       |            |           
+#        #               |           |                       |            |          
+#        #   other o-----o-->--------o-----o                self         self                           
+#        #
+#        # In the case where self is an edge of the lifted triangulation, and other is an edge of the
+#        # pc triangulation (which is the case we care about), it cannot happen that a vertex of other lies
+#        # in the interior of self, so we don't need to worry about that case.
+#
+#        # we will assume that other is an edge that consists of a single segment, since that's all we
+#        # need for now (all edges of the pc triangulation consist of a single segment).
+#
+#        assert other.num_segments() == 1
+#
+#        other_seg = other.segment(0)
+#        alg_intersection = int(0)
+#
+#        segment_list = list(self.segments())
+#
+#        # if segment_list[0] has its initial point at a vertex of other, then we iteratively remove segments 
+#        # from the beginning of segment_list until segment_list[0] has its initial point disjoint from other.
+#        # Similarly if segment_list[-1] has its terminal point at a vertex of other, then we iteratively remove
+#        # segments from the end of segment_list until segment_list[-1] has its terminal vertex disjoint from
+#        # other.
+#
+#        # Once we have adjusted segment_list as described above, we can determine the algebraic intersection
+#        # number of self with other by adding up intersection numbers of individual segments of self. 
+#
+#        if segment_list[0].endpoint(0) == other.point(0) or segment_list[0].endpoint(0) == other.point(1):
+#            while other_seg.on_seg(segment_list[0].endpoint(0)):
+#                _ = segment_list.pop(0)
+#                if len(segment_list) == 0:
+#                    return 0
+#
+#        if segment_list[-1].endpoint(1) == other.point(0) or segment_list[-1].endpoint(1) == other.point(1):
+#            while other_seg.on_seg(segment_list[-1].endpoint(1)):
+#                _ = segment_list.pop(-1)
+#                if len(segment_list) == 0:
+#                    return 0
+#
+#
+#
+#        for seg in segment_list:
+#            if other_seg.on_seg(seg.endpoint(0)):
+#                if other_seg.below_seg(seg.endpoint(1)):
+#                    alg_intersection -= 1
+#                elif other_seg.above_seg(seg.endpoint(1)):
+#                    alg_intersection += 1
+#            elif other_seg.below_seg(seg.endpoint(0)):
+#                if other_seg.on_seg(seg.endpoint(1)):
+#                    alg_intersection += 1
+#                elif other_seg.above_seg(seg.endpoint(1)):
+#                    if other_seg.transverse_to(seg):
+#                        alg_intersection += 2
+#            elif other_seg.above_seg(seg.endpoint(0)):
+#                if other_seg.on_seg(seg.endpoint(1)):
+#                    alg_intersection -= 1
+#                elif other_seg.below_seg(seg.endpoint(1)):
+#                    if other_seg.transverse_to(seg):
+#                        alg_intersection -= 2
+#
+#        geom_int = abs(alg_intersection/2)
+#        assert geom_int == int(geom_int)
+#
+#        return int(geom_int)
+#
+#
+#
+#
 
 class MarkedEdge(Edge):
     def __init__(self, vertices, points, maps_to, index=None):
@@ -851,6 +960,11 @@ class Segment:
             else:
                 self._slope = (a.imag() - b.imag())/(a.real() - b.real())
         return self._slope
+
+    def unit_tangent(self):
+        tangent = self.endpoint(1).alg() - self.endpoint(0).alg()
+        unit_tangent = tangent/tangent.abs()
+        return unit_tangent
 
     def y_intercept(self): ## return an RIF, not an algebraic integer
         if self.slope() != Infinity:
@@ -989,8 +1103,19 @@ class Point:
     def alg(self):
         return self._alg
 
+    def _set_alg(self, new_alg):
+        self._alg = new_alg
+        self._set_cif()
+
+
     def cif(self):
         return self._cif
+
+    def _set_cif(self):
+        if self._alg == Infinity:
+            self._cif = CIF(Infinity)
+        else:
+            self._cif = self._alg.interval(ComplexIntervalField(self._precision))
 
     def precision(self):
         return self._precision
@@ -1018,9 +1143,9 @@ class Point:
         return Point(self.alg()*other)
 
     def __add__(self,other):
-        return Point(self.alg() - other)
+        return Point(self.alg() + other)
 
-    def __add__(self,other):
+    def __sub__(self,other):
         return Point(self.alg() - other)
 
 

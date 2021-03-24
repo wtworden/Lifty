@@ -434,6 +434,8 @@ class TopPoly:
                 for points in e_lifted_edges:
                     j,k = vertex_pts.index(points[0]), vertex_pts.index(points[-1])
                     v,w = vertices[j], vertices[k]
+                    points[0] = vertices[j].point()
+                    points[-1] = vertices[k].point()
                     subvertices += points[1:-1]
                     edge = MarkedEdge([v,w],points, i, None)
                     all_edges.append(edge)
@@ -456,6 +458,17 @@ class TopPoly:
 
             # now we can make sure all points in the triangulation have disjoint intervals.
             make_intervals_disjoint(subvertices+vertex_pts, self.max_precision())
+
+            # make sure the length of the shortest segment is large compared to the precision
+            short_seg = min([s.length() for e in all_edges for s in e.segments()])
+            min_prec = min([p.precision() for p in subvertices+vertex_pts])
+            dec_prec = 10**(-(min_prec*log(2,10)))
+            if short_seg < dec_prec*1000000:
+                new_prec = int((-log(short_seg,10)+7)/log(2,10))
+                for p in subvertices+vertex_pts:
+                    if p.precision() < new_prec:
+                        p.set_precision(new_prec)
+
 
             T = LiftedTriangulation(all_edges, self)
 
