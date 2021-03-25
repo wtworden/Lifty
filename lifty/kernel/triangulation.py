@@ -265,7 +265,7 @@ class Triangulation:
                     a = v.point().alg()
                     if angle.overlaps(RIF(pi)):
                         if prev_angle.overlaps(RIF(0)):
-                            b = (a1 - a)*I
+                            b = (a1 - a)*QQbar(I)
                         else:
                             b = prev_b
                     else:
@@ -544,11 +544,29 @@ class Triangulation:
                             if alg_ints_tuples[i][1] == alg_ints_tuples[j][1]:
                                 return True, alg_ints_tuples, (i,j)
                     return False, alg_ints_tuples, (None,None)
+
+                # A normal arc with endpoint at a vertex v of triangle t should have its first intersection
+                # on the edge across from v. If the first intersection is with an edge that shares the vertex
+                # v, then this gives a bigon (with one vertex v, hence and end bigon). If we see this we should
+                # omit that intersection, such omission corresponds to isotoping across the bigon to remove it.
+                def has_end_bigons(alg_ints_tuples):
+                    if len(alg_ints_tuples) > 0:
+                        if lifted_edge.vertex(0).index() in vertices[alg_ints_tuples[0][1]]:
+                            return True, alg_ints_tuples, 0 
+                        elif lifted_edge.vertex(1).point() in vertices[alg_ints_tuples[-1][1]]:
+                            return True, alg_ints_tuples, -1
+                    return False, alg_ints_tuples, None
+
                 bigons, alg_ints_tuples, (i,j) = has_bigons(alg_ints_tuples)
                 while bigons:
                     _ = alg_ints_tuples.pop(j)
                     _ = alg_ints_tuples.pop(i)
                     bigons, alg_ints_tuples, (i,j) = has_bigons(alg_ints_tuples)
+
+                end_bigons, alg_ints_tuples, i = has_end_bigons(alg_ints_tuples)
+                while end_bigons:
+                    _ = alg_ints_tuples.pop(i)
+                    end_bigons, alg_ints_tuples, i = has_bigons(alg_ints_tuples)
 
                 for tup in alg_ints_tuples:
                     i = tup[1]
@@ -560,7 +578,7 @@ class Triangulation:
                 alg_arc = alg_arcs[i]
                 geom_arc = geom_arcs[i]
 
-                arc = Arc(self._combinatorial, vertices, alg_arc, geom_arc)
+                arc = Arc(self._combinatorial, vertices[i], alg_arc, geom_arc)
                 arcs.append(arc)
             multi_arc = MultiArc(arcs)
 
@@ -787,6 +805,9 @@ class Edge:
 
     def vertex(self,i):
         return self._vertices[i]
+
+    def vertices(self):
+        return self._vertices
 
     def other_vert(self, vert):
         if vert == self.vert(0):
