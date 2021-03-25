@@ -336,7 +336,7 @@ class Arc():
         return self._geometric
 
     def __repr__(self):
-        return 'arc with vertices: [{}, {}], intersections: {}'.format(self.vertex(0), self.vertex(1), self.vector())
+        return 'arc with vertices: [{}, {}], intersections: {}'.format(self.vertex(0), self.vertex(1), self.algebraic())
 
 
 class MultiArc():

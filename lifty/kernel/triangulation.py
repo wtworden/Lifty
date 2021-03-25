@@ -5,6 +5,7 @@ from __future__ import print_function
 from lifty.sage_types import *
 import random
 import itertools as it
+from copy import deepcopy
 #from curver import create_triangulation
 #from curver.kernel.triangulation import Triangulation as curverTriangulation
 #from curver.kernel.triangulation import Edge as curverEdge
@@ -87,7 +88,7 @@ class Triangulation:
 
     def min_vertex_angle(self):
         min_angle = 2*pi
-        for v in self.vertices():
+        for v in self.vertices()[:-1]:
             p = v.point()
             incident = v.incident_edges()
             for i in range(len(incident)):
@@ -458,7 +459,7 @@ class Triangulation:
             pc_tri = self._pc_triangulation
             arcs = []
             self_copy = deepcopy(self)
-            eps = 10^(-int(-log(min([seg.length() for edge in self_copy.edges() for seg in edge.segments()]).center()/1000,10)))
+            eps = QQbar(QQ(1)/(10**(int(-log(min([seg.length() for edge in self_copy.edges() for seg in edge.segments()]).center()/1000,10)))))
             min_angle = self_copy.min_vertex_angle()
             vertices = [[None,None] for i in range(pc_tri.num_edges())]
             for pc_edge in pc_tri.edges():
@@ -480,7 +481,7 @@ class Triangulation:
                     for i in range(len(e.points())):
                         p = e.point(i)
                         # if p in on pc_edge but is not at one of its vertices...
-                        if pc_edge_seg.on_seg(p) and ( p==pc_edge.vertex(0).point() or p==pc_edge.vertex(1).point() ):
+                        if pc_edge_seg.on_seg(p) and not ( p==pc_edge.vertex(0).point() or p==pc_edge.vertex(1).point() ):
 
                             # push p off of pc_edge_seg to the left (relative to orientation of pc_edge_seg) by eps. By
                             # definition eps is about .001 times the length of the sortest segment of self_copy,
@@ -497,15 +498,14 @@ class Triangulation:
                             while eps0 > y:
                                 eps0 = eps0/10
                                 prec = min([point.precision() for edge in self_copy.edges() for point in edge.points()])
-                                if eps0 < 1000*(10^(-prec*log(2,10)))
+                                if eps0 < 1000*(10**(-prec*log(2,10))):
                                     if prec < self.top_poly().max_precision():
                                         prec = prec*2
                                         for point in [point for edge in self_copy.edges() for point in edge.points()]:
                                             point.set_precision(prec)
                                     else:
                                         raise IntervalError('max precision reached: when trying to compute combinatorial triangulation')
-                            
-                            p._set_alg(p.alg()+eps0*e_seg.unit_tangent()*QQbar(I))
+                            p._set_alg(p.alg()+eps0*pc_edge_seg.unit_tangent()*QQbar(I))
 
             alg_intersections_lists = []
             alg_arcs = [[0 for i in range(self_copy.num_edges())] for j in range(pc_tri.num_edges())]
@@ -513,17 +513,18 @@ class Triangulation:
             for lifted_edge in self_copy.edges():
                 alg_intersections = []
                 for i in range(len(lifted_edge.segments())):
-                    seg = lefted_edge.segment(i)
+                    seg = lifted_edge.segment(i)
                     for e in pc_tri.edges():
-                        if seg.transverse_to(e.segment()):
+                        if seg.transverse_to(e.segment(0)):
                             a,b = seg.endpoint(0).cif(), seg.endpoint(1).cif()
-                            c,d = e.segment().endpoint(0).cif(), e.segment().endpoint(1).cif()
+                            c,d = e.segment(0).endpoint(0).cif(), e.segment(0).endpoint(1).cif()
                             # first translate by c to get c==0
                             a,b = a-c, b-c
                             c,d = c-c, d-c
-                            # now rotate so that c----d has slope 1
+                            # now rotate so that (c)-->--(d) has slope 1
                             z = exp(I*(pi/4 - d.arg()))
                             a,b = a*z, b*z
+                            d = d*z
                             # seg is now parametrized by P+tv, with P=a and v=b-a.
                             v = b-a
                             P = a
@@ -533,22 +534,22 @@ class Triangulation:
                             alg_intersections.append((i+t,alg_int,e.index()))
                 alg_intersections.sort(key=lambda x:x[0])
                 # now that the intersections are in order, we don't need the t+i parameter
+                print(lifted_edge.index(),alg_intersections)
                 alg_ints_tuples = [(tup[1],tup[2]) for tup in alg_intersections]
                 # now look for consecutive intersections through the same edge, and remove them recursively
                 # until all are gone (these correspond to bigons)
                 def has_bigons(alg_ints_tuples):
                     for i in range(len(alg_ints_tuples)-1):
-                        for j in range(i+1,alg_ints_tuples):
-                            if alg_ints_tuples[i][1] == alg_int_tuples[j][1]:
+                        for j in range(i+1,len(alg_ints_tuples)):
+                            if alg_ints_tuples[i][1] == alg_ints_tuples[j][1]:
                                 return True, alg_ints_tuples, (i,j)
-                    return False, alg_ints_tuples
+                    return False, alg_ints_tuples, (None,None)
                 bigons, alg_ints_tuples, (i,j) = has_bigons(alg_ints_tuples)
                 while bigons:
                     _ = alg_ints_tuples.pop(j)
                     _ = alg_ints_tuples.pop(i)
                     bigons, alg_ints_tuples, (i,j) = has_bigons(alg_ints_tuples)
 
-                alg_intersections_list.append(tuple(alg_intersections))
                 for tup in alg_ints_tuples:
                     i = tup[1]
                     alg_arcs[i][lifted_edge.index()] += tup[0]
@@ -559,7 +560,7 @@ class Triangulation:
                 alg_arc = alg_arcs[i]
                 geom_arc = geom_arcs[i]
 
-                arc = Arc(self._combinatorial, vertices, alg_arc_vector, geom_arc_vector)
+                arc = Arc(self._combinatorial, vertices, alg_arc, geom_arc)
                 arcs.append(arc)
             multi_arc = MultiArc(arcs)
 
