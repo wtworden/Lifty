@@ -104,7 +104,7 @@ class CTriangulation():
             triangles adjacent to it, and each of these triangles is collapsed by identifying 
             its other two edges, and the two vertices that are the endpoint of e.
 
-            ArcSystems associated to this triangulation are adjusted as needed.
+            ### TO DO: ArcSystems associated to this triangulation should be adjusted as needed.
 
             Warning: this operation changes the triangulation.
         '''
@@ -334,6 +334,37 @@ class Arc():
 
     def geometric(self):
         return self._geometric
+
+    def isotope_through_vertex(self, edge_index, vertex_index):
+        """
+        """
+        T = self._triangulation
+        assert self.edge_weight(edge_index) != 0, "this arc does not intersect the edge with index edge_index"
+        assert T.vertex(vertex_index).is_ideal() == False, "you cannot isotope over an ideal vertex"
+        e_unsigned = T.edge(edge_index)
+        v = T.vertex(vertex_index)
+        degree = v.degree()
+        if e_unsigned.vertex(0) == v:
+            w = e_unsigned.vertex(1)
+            e = e_unsigned.negative_rep()
+        else:
+            w = e_unsigned.vertex(0)
+            e = e_unsigned.positive_rep()
+        e_rel_v = v.incident_edges().index(e)
+        e_rel_w = w.incident_edges().index(e.opp_signed_edge())
+        a = v.incident_edge((e_rel_v+1)%degree)
+        b = v.incident_edge((e_rel_v-1)%degree)
+        c = w.incident_edge((e_rel_w+1)%degree)
+        d = w.incident_edge((e_rel_w-1)%degree)
+
+        e_wt = self.edge_weight(e.index())
+        a_wt = self.edge_weight(a.index())
+        b_wt = self.edge_weight(b.index())
+        c_wt = self.edge_weight(c.index())
+        d_wt = self.edge_weight(d.index())
+
+        ##### this is in-progress ######
+        
 
     def __repr__(self):
         return 'arc with vertices: [{}, {}], intersections: {}'.format(self.vertex(0), self.vertex(1), self.algebraic())

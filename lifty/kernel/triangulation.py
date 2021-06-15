@@ -6,10 +6,6 @@ from lifty.sage_types import *
 import random
 import itertools as it
 from copy import deepcopy
-#from curver import create_triangulation
-#from curver.kernel.triangulation import Triangulation as curverTriangulation
-#from curver.kernel.triangulation import Edge as curverEdge
-#from curver.kernel.triangulation import Triangle as curverTriangle
 
 from lifty.kernel.combinatorial_tri import *
 
@@ -247,7 +243,7 @@ class Triangulation:
                 e2 = v.incident_edges()[(e1_index+1)%L]
 
                 # walk counter-clockwise around the perimeter of the finite triangulation, adding infinite 
-                # edges as we go. Some vertices might appear on the perimeter more than one (e.g., for the 
+                # edges as we go. Some vertices might appear on the perimeter more than once (e.g., for the 
                 # airplane), so we need to keep going until we see the vertex w with previous and next edges
                 # E1 and E2, resp.
                 while (v,e1) != (w,E1):
@@ -308,29 +304,6 @@ class Triangulation:
                         next_edge_index += 1
                 for i in range(len(self.finite_vertices())):
                     self.set_incident_edges(i)
-#               F = pc_tri.num_finite_edges()
-#               for v in verts:
-#                   m = len(v.incident_edges())
-#                   insertions = []
-#                   for i in range(m):
-#                       ind1, ind2 = v.incident_edges()[i], v.incident_edges()[(i+1)%m]
-#                       e1, e2 = self.edge(ind1), self.edge(ind2)
-#                       V = v.maps_to()
-#                       IND1, IND2 = e1.maps_to(), e2.maps_to()
-#                       j = V.incident_edges().index(IND1)
-#                       M = len(V.incident_edges())
-#                       next_edge_index = V.incident_edges()[(j+1)%M]
-#                       if next_edge_index >= F:
-#                           insertions.append(((i+1)%m, next_edge_index))
-#                       else:
-#                           assert next_edge_index == IND2
-#                   insertions.sort()
-#                   insertions.reverse()
-#                   for i, edge_ind in insertions:
-#                       new_edge = MarkedEdge([v, inf_vert],[v.point(), inf_vert.point()], edge_ind)
-#                       self._edges.append(new_edge)
-#                       new_edge._index = self.num_edges()-1
-#                       v.incident_edges().insert(i,new_edge.index())
 
             E = self.edge(self.num_finite_edges())
             inf_edges_ordered = [E.index()]
@@ -586,49 +559,6 @@ class Triangulation:
 
         return self._combinatorial
 
-#    def combinatorial_old(self):
-#        if self._combinatorial_old is None:
-#            triangles = []
-#            edges_used = []
-#            for e in self.edges():
-#                for oriented_ind in [int(e.index()), ~int(e.index())]:
-#                    if oriented_ind not in edges_used:
-#                        e0 = e
-#                        ind = e.index()
-#                        triangle = [int(oriented_ind)]
-#                        if oriented_ind >= 0:
-#                            opp_vert = 1
-#                        else:
-#                            opp_vert = 0
-#                        for i in range(2):
-#                            v0 = e0.vertex(opp_vert)
-#                            L = v0.valence()
-#                            prev = (v0.incident_edges().index(ind)-1)%L
-#                            ind = v0.incident_edges()[prev]
-#                            e0 = self.edge(ind)
-#                            if e0.vertex(0) == v0:
-#                                triangle.append(int(ind))
-#                                opp_vert = 1
-#                            elif e0.vertex(1) == v0:
-#                                triangle.append(~int(ind))
-#                                opp_vert = 0
-#                        v0 = e0.vertex(opp_vert)
-#                        L = v0.valence()
-#                        prev = (v0.incident_edges().index(ind)-1)%L
-#                        ind = v0.incident_edges()[prev]
-#                        assert ind == e.index()
-#                        triangles.append(triangle)
-#                        edges_used.extend(triangle)
-#            vertex_markings = {}
-#            for v in self.vertices():
-#                if v.point() in self.top_poly().postcritical_set():
-#                    vertex_markings[tuple(v.incident_edges())] = True
-#                else:
-#                    vertex_markings[tuple(v.incident_edges())] = False
-#
-#            self._combinatorial_old = CurverTriangulation(triangles,vertex_markings)
-#        return self._combinatorial_old
-
 
     def is_embedded(self):
         E = self._edges
@@ -758,27 +688,7 @@ class LiftedTriangulation(Triangulation):
         self._is_lifted = True
         self._vertices[-1] = MarkedVertex(Point(Infinity), self._pc_triangulation.vertices()[-1], self._vertices[-1].index())
 
-#class CurverTriangulation(curverTriangulation):
-#    def __init__(self,triangles,vertex_markings):
-#        c_triangles = []
-#        for t in triangles:
-#            Ct = curverTriangle([curverEdge(t[i]) for i in range(len(t))])
-#            c_triangles.append(Ct)
-#
-#
-#        curverTriangulation.__init__(self,c_triangles)
-#
-#        self._vertex_markings = dict([(v,False) for v in self.vertices])
-#        for v in self.vertices:
-#            for w in vertex_markings:
-#                if set(w) == set([e.index for e in v]):
-#                    self._vertex_markings[v] = vertex_markings[w]
-#
-#    def vertex_markings(self):
-#        return self._vertex_markings
-#
-#    def is_post_critical(self, vertex):
-#        return self.vertex_markings()[vertex]
+
 
 class Edge:
     def __init__(self, vertices, points, index = None):
@@ -842,92 +752,7 @@ class Edge:
 
         self._points.insert(seg_indx+1, subdivision_point)
 
-#    def alg_intersection(self,other):
-#        # We define the algebraic intersection number as follows: for each transverse intersection 
-#        # of self with other of the form shown, add +/- 1 as shown:
-#
-#        #                                        self
-#        #                          ^    +1         |     -1
-#        #                          |               |
-#        #              other o-----|-------->------|---------o
-#        #                          |               |
-#        #                          |               v                   
-#        #                        self
-#        #
-#        # If a vertex of self lies on the interior of other, then we add +/- 1/2 as shown:
-#
-#        #             self         self        other o------o-->---------o-------o
-#        #               |           |                       |            |    
-#        #               |           |                       |  +1/2      |  -1/2      
-#        #               ^           v                       ^            v        
-#        #          +1/2 |      -1/2 |                       |            |           
-#        #               |           |                       |            |          
-#        #   other o-----o-->--------o-----o                self         self                           
-#        #
-#        # In the case where self is an edge of the lifted triangulation, and other is an edge of the
-#        # pc triangulation (which is the case we care about), it cannot happen that a vertex of other lies
-#        # in the interior of self, so we don't need to worry about that case.
-#
-#        # we will assume that other is an edge that consists of a single segment, since that's all we
-#        # need for now (all edges of the pc triangulation consist of a single segment).
-#
-#        assert other.num_segments() == 1
-#
-#        other_seg = other.segment(0)
-#        alg_intersection = int(0)
-#
-#        segment_list = list(self.segments())
-#
-#        # if segment_list[0] has its initial point at a vertex of other, then we iteratively remove segments 
-#        # from the beginning of segment_list until segment_list[0] has its initial point disjoint from other.
-#        # Similarly if segment_list[-1] has its terminal point at a vertex of other, then we iteratively remove
-#        # segments from the end of segment_list until segment_list[-1] has its terminal vertex disjoint from
-#        # other.
-#
-#        # Once we have adjusted segment_list as described above, we can determine the algebraic intersection
-#        # number of self with other by adding up intersection numbers of individual segments of self. 
-#
-#        if segment_list[0].endpoint(0) == other.point(0) or segment_list[0].endpoint(0) == other.point(1):
-#            while other_seg.on_seg(segment_list[0].endpoint(0)):
-#                _ = segment_list.pop(0)
-#                if len(segment_list) == 0:
-#                    return 0
-#
-#        if segment_list[-1].endpoint(1) == other.point(0) or segment_list[-1].endpoint(1) == other.point(1):
-#            while other_seg.on_seg(segment_list[-1].endpoint(1)):
-#                _ = segment_list.pop(-1)
-#                if len(segment_list) == 0:
-#                    return 0
-#
-#
-#
-#        for seg in segment_list:
-#            if other_seg.on_seg(seg.endpoint(0)):
-#                if other_seg.below_seg(seg.endpoint(1)):
-#                    alg_intersection -= 1
-#                elif other_seg.above_seg(seg.endpoint(1)):
-#                    alg_intersection += 1
-#            elif other_seg.below_seg(seg.endpoint(0)):
-#                if other_seg.on_seg(seg.endpoint(1)):
-#                    alg_intersection += 1
-#                elif other_seg.above_seg(seg.endpoint(1)):
-#                    if other_seg.transverse_to(seg):
-#                        alg_intersection += 2
-#            elif other_seg.above_seg(seg.endpoint(0)):
-#                if other_seg.on_seg(seg.endpoint(1)):
-#                    alg_intersection -= 1
-#                elif other_seg.below_seg(seg.endpoint(1)):
-#                    if other_seg.transverse_to(seg):
-#                        alg_intersection -= 2
-#
-#        geom_int = abs(alg_intersection/2)
-#        assert geom_int == int(geom_int)
-#
-#        return int(geom_int)
-#
-#
-#
-#
+
 
 class MarkedEdge(Edge):
     def __init__(self, vertices, points, maps_to, index=None):

@@ -9,12 +9,11 @@ def collapse_edge(CTri, edge_index):
         triangles adjacent to it, and each of these triangles is collapsed by identifying 
         its other two edges, and the two vertices that are the endpoint of e. 
 
-        ArcSystems associated to this triangulation are adjusted as needed.
+        TO DO: ArcSystems associated to this triangulation are adjusted as needed.
 
         Warning: this operation changes the triangulation.
     '''
-    #print(T)
-    #print('edge:{}'.format(edge_index))
+
     T = CTri
     assert T.is_collapsible(edge_index), 'this edge is not collapsible'
 
@@ -47,7 +46,6 @@ def collapse_edge(CTri, edge_index):
     e_bot_left = v_bot.incident_edges()[e_bot_left_index]
     e_bot_right = v_bot.incident_edges()[e_bot_right_index]
 
-    #print('e_bot_left/right:{},{}'.format(e_bot_left,e_bot_right))
 
     degree = v_top.degree()
 
@@ -179,8 +177,8 @@ def collapse_edge(CTri, edge_index):
 
     return True
 
-def collapse_to_ideal(T):
-
+def collapse_to_ideal(CTri):
+    T = CTri
     T_copy = copy.deepcopy(T)
 
     collapsible = T_copy.collapsible_edges()

@@ -3,6 +3,8 @@ import copy
 def find_path(T1, T2):
     """Find a path of pachner flips that take the Curver triangulation T1 to the Curver Triangulation T2."""
 
+    ### TO DO: everything
+
     pass
 
 
@@ -30,6 +32,8 @@ def find_path(T1, T2):
     #
 
 def flip_edge(CTri, edge_index):
+
+    ### TO DO: keep track of multi-arcs
 
     T = CTri
 
