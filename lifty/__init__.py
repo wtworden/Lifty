@@ -1,5 +1,5 @@
 
-from tnorm.version import version, __version__
+from lifty.version import version, __version__
 import sys
 
 
