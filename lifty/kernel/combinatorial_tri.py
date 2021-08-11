@@ -2,6 +2,8 @@
 import lifty.kernel.collapse as collapse
 import lifty.kernel.flip as flip
 
+from lifty.sage_types import flatten
+
 
 class CTriangulation():
     def __init__(self, triangles, vertices, vertex_markings, vertex_mappings, is_lifted_tri):
@@ -104,7 +106,7 @@ class CTriangulation():
             triangles adjacent to it, and each of these triangles is collapsed by identifying 
             its other two edges, and the two vertices that are the endpoint of e.
 
-            ### TO DO: ArcSystems associated to this triangulation should be adjusted as needed.
+            MultiArcs associated to this triangulation are adjusted along the way.
 
             Warning: this operation changes the triangulation.
         '''
@@ -165,8 +167,11 @@ class CTriangle():
 
     def opp_vert(self, edge):
         edge_index = self.edges().index(edge)
-        return self._vertices[edge_index]
+        return self.vertex(edge_index)
 
+    def opp_signed_edge(self, vert):
+        vert_index = self.vertices().index(vert)
+        return self.signed_edge(vert_index)
 
     def __repr__(self):
         return str(self._signed_edges)
@@ -296,6 +301,11 @@ class CVertex():
 
         return self._incident_edges
 
+    def next_incident_edge(self, edge):
+        this = self.incident_edges().index(edge)
+        return self.incident_edges()[(this+1)%self.degree()]
+
+
     def maps_to(self):
         return self._maps_to
 
@@ -314,11 +324,92 @@ class CVertex():
         return str((self.incident_edges(), self.is_postcritical()))
 
 class Arc():
-    def __init__(self, Ctriangulation, vertices, alg_edge_intersections, geom_edge_intersections):
-        self._algebraic = tuple(alg_edge_intersections)
-        self._geometric = tuple(geom_edge_intersections)
-        self._vertices = tuple(vertices)
+    def __init__(self, Ctriangulation, vertices, algebraic_ints, geometric_ints, intersection_sequence=None):
+        
         self._triangulation = Ctriangulation
+        self._vertices = tuple([self._triangulation.vertex(vertices[0]), self._triangulation.vertex(vertices[1])])
+        assert self._vertices[1].is_ideal()
+        assert self._vertices[0].is_ideal()
+        
+        if intersection_sequence != None:
+            self._intersection_sequence = []
+            for i in intersection_sequence:
+                i = int(i)
+                if i<0:
+                    self._intersection_sequence.append(self._triangulation.edge(~i).negative_rep())
+                else:
+                    self._intersection_sequence.append(self._triangulation.edge(i).positive_rep())
+
+            self._geometric = None
+            self._algebraic = None
+            self._recompute_intersection_vectors()
+        else:
+            self._geometric = geometric_ints
+            self._algebraic = algebraic_ints
+
+
+            # it will be useful to also encode the arc as a sequence of edge intersections (i.e., start
+            # at self._vertices[0] and walk along the arc, record edges crossed (with sign) as you go). This 
+            # makes it especially easy to remove bigons.
+            self._intersection_sequence = []
+            if sum(self._geometric) > 0:
+                T = self._triangulation
+                v0 = self._vertices[0]
+                v1 = self._vertices[1]
+                # first we need to find the initial edge crossed:
+                for t in T.triangles():
+                    if v0 in t.vertices():
+                        e_opp = t.opp_signed_edge(v0)
+                        e_left = t.edge((t.signed_edges().index(e_opp)+1)%3)
+                        e_right = t.edge((t.signed_edges().index(e_opp)+2)%3)
+                        a = self._geometric[e_opp.index()]
+                        b = self._geometric[e_left.index()]
+                        c = self._geometric[e_right.index()]
+                        if a > b + c:
+                            print(a,b,c)
+                            self._intersection_sequence.append(e_opp)
+                            exit_edge = e_opp
+                            enter_edge = e_opp.opp_signed_edge()
+                            next_triangle = enter_edge.adjacent_triangle()
+                            position = b
+                            print(exit_edge, enter_edge, next_triangle,position)
+                            break
+                while exit_edge != None:
+                    t = next_triangle
+                    e_right = t.signed_edge((t.signed_edges().index(enter_edge)+1)%3)
+                    e_left = t.signed_edge((t.signed_edges().index(enter_edge)+2)%3)
+                    a = self._geometric[enter_edge.index()]
+                    b = self._geometric[e_left.index()]
+                    c = self._geometric[e_right.index()]
+                    top_arcs = (b+c-a)/2
+                    b_a = b - max([0,top_arcs])
+                    if top_arcs >= 0 or position != b_a:
+                        if b_a == position:
+                            self._intersection_sequence.append(e_right)
+                            exit_edge = e_right
+                            enter_edge = e_right.opp_signed_edge()
+                            next_triangle = enter_edge.adjacent_triangle()
+                            position = top_arcs
+                        elif b_a < position:
+                            self._intersection_sequence.append(e_right)
+                            exit_edge = e_right
+                            enter_edge = e_right.opp_signed_edge()
+                            next_triangle = enter_edge.adjacent_triangle()
+                            if top_arcs >= 0:
+                                position = top_arcs + (position - b_a)
+                            else:
+                                position = position - b_a - 1
+                        elif b_a > position:
+                            self._intersection_sequence.append(e_left)
+                            exit_edge = e_left
+                            enter_edge = e_left.opp_signed_edge()
+                            next_triangle = enter_edge.adjacent_triangle()
+                            position = position
+                    else:
+                        exit_edge = None
+
+    def intersection_sequence(self):
+        return self._intersection_sequence
 
     def vertex(self, index):
         return self._vertices[index]
@@ -327,7 +418,7 @@ class Arc():
         return self._vertices
 
     def edge_weight(self,edge_index):
-        return self._vector[edge_index]
+        return self._geometric[edge_index]
 
     def algebraic(self):
         return self._algebraic
@@ -335,35 +426,97 @@ class Arc():
     def geometric(self):
         return self._geometric
 
+    def triangulation(self):
+        return self._triangulation
+
+    # bigons correspond to subsequences of self._intersection_sequence of the form x,~x.
+    def _has_bigons(self):
+
+        for i in range(len(self._intersection_sequence)-1):
+            if self._intersection_sequence[i].label() == ~self._intersection_sequence[i+1].label():
+                return True, self._intersection_sequence[i], (i,i+1)
+        return False, None, (None,None)
+
+    #remove all bigons recursively
+    def _remove_bigons(self):
+        bigons, _, (i,j) = self._has_bigons()
+        while bigons:
+            _ = self._intersection_sequence.pop(j)
+            _ = self._intersection_sequence.pop(i)
+            bigons, _, (i,j) = self._has_bigons()
+
+    # A normal arc with endpoint at a vertex v of triangle t should have its first intersection
+    # on the edge across from v. If the first intersection is with an edge that shares the vertex
+    # v, then this gives a bigon (with one vertex v, hence an end bigon). 
+    def _has_end_bigons(self):
+        if len(self._intersection_sequence) > 0:
+            first_intersection = self._intersection_sequence[0].index() 
+            last_intersection = self._intersection_sequence[-1].index()
+            if self.vertex(0) in self.triangulation().edge(first_intersection).vertices():
+                return True, first_intersection, 0 
+            if self.vertex(1) in self.triangulation().edge(last_intersection).vertices():
+                return True, last_intersection, -1
+        return False, None, None
+
+    def _remove_end_bigons(self):
+        end_bigons, edge, i = self._has_end_bigons()
+        while end_bigons:
+            self._intersection_sequence.pop(i)
+            end_bigons, edge, i = self._has_end_bigons()
+
+
     def isotope_through_vertex(self, edge_index, vertex_index):
         """
         """
         T = self._triangulation
-        assert self.edge_weight(edge_index) != 0, "this arc does not intersect the edge with index edge_index"
         assert T.vertex(vertex_index).is_ideal() == False, "you cannot isotope over an ideal vertex"
-        e_unsigned = T.edge(edge_index)
-        v = T.vertex(vertex_index)
-        degree = v.degree()
-        if e_unsigned.vertex(0) == v:
-            w = e_unsigned.vertex(1)
-            e = e_unsigned.negative_rep()
+        
+
+        if self.edge_weight(edge_index) == 0: #if the arc doesn't intersect this edge, do nothing.
+            pass
         else:
-            w = e_unsigned.vertex(0)
-            e = e_unsigned.positive_rep()
-        e_rel_v = v.incident_edges().index(e)
-        e_rel_w = w.incident_edges().index(e.opp_signed_edge())
-        a = v.incident_edge((e_rel_v+1)%degree)
-        b = v.incident_edge((e_rel_v-1)%degree)
-        c = w.incident_edge((e_rel_w+1)%degree)
-        d = w.incident_edge((e_rel_w-1)%degree)
+            e_unsigned = T.edge(edge_index)
+            v = T.vertex(vertex_index)
+            degree = v.degree()
+            if e_unsigned.vertex(0) == v:
+                w = e_unsigned.vertex(1)
+                e = e_unsigned.positive_rep()
+            else:
+                w = e_unsigned.vertex(0)
+                e = e_unsigned.negative_rep()
+            e_rel_v = v.incident_edges().index(e)
+    
+            v_incident_sans_e = v.incident_edges()[e_rel_v+1:]+v.incident_edges()[0:e_rel_v]
+    
+            for i in range(len(self.intersection_sequence())):
+                edge = self.intersection_sequence()[i]
+                if edge == e:
+                    new_subseq = [a.opp_signed_edge() for a in v_incident_sans_e]
+                    _ = self._intersection_sequence.pop(i)
+                    self._intersection_sequence.insert(i,new_subseq)
+                elif edge == e.opp_signed_edge():
+                    new_subseq = list(reversed(v_incident_sans_e))
+                    _ = self._intersection_sequence.pop(i)
+                    self._intersection_sequence.insert(i,new_subseq)
+                else:
+                    pass
+            self._intersection_sequence = flatten(self._intersection_sequence)
+    
+            self._remove_bigons()
+            self._remove_end_bigons()
 
-        e_wt = self.edge_weight(e.index())
-        a_wt = self.edge_weight(a.index())
-        b_wt = self.edge_weight(b.index())
-        c_wt = self.edge_weight(c.index())
-        d_wt = self.edge_weight(d.index())
 
-        ##### this is in-progress ######
+    def _recompute_intersection_vectors(self):
+        geometric = []
+        algebraic = []
+        T = self.triangulation()
+        for i in range(T.num_edges()):
+            pos = self.intersection_sequence().count(T.edge(i).positive_rep())
+            neg = self.intersection_sequence().count(T.edge(i).negative_rep())
+            geometric.append(pos+neg)
+            algebraic.append(pos-neg)
+        self._geometric = geometric
+        self._algebraic = algebraic
         
 
     def __repr__(self):
@@ -379,6 +532,14 @@ class MultiArc():
 
     def arc(self,index):
         return self._arcs[index]
+
+    def isotope_through_vertex(self, edge_index, vertex_index):
+        for arc in self._arcs:
+            arc.isotope_through_vertex(edge_index, vertex_index)
+
+    def _recompute_intersection_vectors(self):
+        for arc in self._arcs:
+            arc._recompute_intersection_vectors()
 
     def __repr__(self):
         out = 'multi-arc with arcs:\n'

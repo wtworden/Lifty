@@ -527,6 +527,18 @@ def get_random_tp(degree,period):
     coeffs = [1]+[0 for i in range(d-1)]+[c]
     return TopPoly(coeffs)
 
+def get_example(degree,period,root):
+    x = polygen(QQbar)
+    d = degree
+    p = x**d + x
+    for i in range(period-2):
+        p = p**d + x
+    roots = [r[0] for r in complex_roots(p,retval='algebraic')]
+    roots.remove(0)
+    c = roots[root%(len(roots))]
+    coeffs = [1]+[0 for i in range(d-1)]+[c]
+    return TopPoly(coeffs)
+
 
 def quadratic(type):
     """ Return one of the three 3-periodic quadratic polynomials z^2+c. The argument "type" can be

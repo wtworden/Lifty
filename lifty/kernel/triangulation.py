@@ -83,7 +83,7 @@ class Triangulation:
         self.vertices()[vert_indx]._incident_edges = incident_edges
 
     def min_vertex_angle(self):
-        min_angle = 2*pi
+        min_angle = 2*RIF(pi)
         for v in self.vertices()[:-1]:
             p = v.point()
             incident = v.incident_edges()
@@ -352,7 +352,7 @@ class Triangulation:
                         ind = e.index()
 
                         # record the sign of the label, and the e-index (next_vert) of vertex at the forward end
-                        # of e w.r.t. counter-clock-wise travel around the perimeter of the triangle
+                        # of e w.r.t. counter-clockwise travel around the perimeter of the triangle
                         if label >= 0:
                             next_vert = 1
                             tri_signs = [1]
@@ -376,9 +376,9 @@ class Triangulation:
                             v0 = e0.vertex(next_vert)
                             d = v0.degree()
 
-                            # get the edge incident on v0 that comes before e0 in the clockwise ordering of 
+                            # get the edge incident on v0 that comes before e0 in the counter-clockwise ordering of 
                             # edges around v0. This will be the next edge of the triangle after e0 as we traverse
-                            # the boundary of the triangle counter-clock-wise.
+                            # the boundary of the triangle counter-clockwise.
                             prev = (v0.incident_edges().index(ind)-1)%d
 
                             # get the index of the edge, then the actual Edge object
@@ -402,7 +402,7 @@ class Triangulation:
                                 edges[label] = edges[~label]
                             tri_edges.append(edges[label])
 
-                        #get the next verted, then get the incident edge that will should correspond to the
+                        #get the next verted, then get the incident edge that will correspond to the
                         # edge we started with
                         v0 = e0.vertex(next_vert)
                         d = v0.degree()
@@ -480,7 +480,6 @@ class Triangulation:
                                         raise IntervalError('max precision reached: when trying to compute combinatorial triangulation')
                             p._set_alg(p.alg()+eps0*pc_edge_seg.unit_tangent()*QQbar(I))
 
-            alg_intersections_lists = []
             alg_arcs = [[0 for i in range(self_copy.num_edges())] for j in range(pc_tri.num_edges())]
             geom_arcs = [[0 for i in range(self_copy.num_edges())] for j in range(pc_tri.num_edges())]
             for lifted_edge in self_copy.edges():
@@ -494,21 +493,28 @@ class Triangulation:
                             # first translate by c to get c==0
                             a,b = a-c, b-c
                             c,d = c-c, d-c
+
                             # now rotate so that (c)-->--(d) has slope 1
-                            z = exp(I*(pi/4 - d.arg()))
-                            a,b = a*z, b*z
-                            d = d*z
-                            # seg is now parametrized by P+tv, with P=a and v=b-a.
+                            #z = exp(I*(RIF(pi)/4 - d.arg()))
+                            #a,b = a*z, b*z
+                            #d = d*z
+
+                            # if seg is parametrized by P+tv, with P=a and v=b-a, t in [0,1],
                             v = b-a
                             P = a
-                            # the parameter t at the intersection point is:
-                            t = (P.imag()-P.real())/(v.real() - v.imag())
+                            # then the parameter t at the intersection point is:
+                            t = (P.imag()*d.real()-P.real()*d.imag())/(v.real()*d.imag() - v.imag()*d.real())
+                            
+                            # the algebraic intersection i(e,seg) is 1 if the z-component of (d-c) x (b-a) 
+                            # is positive, otherwise is -1
                             alg_int = 2*int((d.real()*(b-a).imag() - (b-a).real()*d.imag()) > 0) - 1
                             alg_intersections.append((i+t,alg_int,e.index()))
                 alg_intersections.sort(key=lambda x:x[0])
+
                 # now that the intersections are in order, we don't need the t+i parameter
                 print(lifted_edge.index(),alg_intersections)
                 alg_ints_tuples = [(tup[1],tup[2]) for tup in alg_intersections]
+
                 # now look for consecutive intersections through the same edge, and remove them recursively
                 # until all are gone (these correspond to bigons)
                 def has_bigons(alg_ints_tuples):
@@ -610,7 +616,7 @@ class Triangulation:
         return self._is_lifted
 
 
-    def plot(self, thickness=.7, DPI=400, aspect_ratio=1,show_vertices=True, arrow_size=.03, point_size=1, show_pc_tri=False, show_axes=False):
+    def plot(self, thickness=.7, DPI=400, aspect_ratio=1,show_vertices=True, arrow_size=3, point_size=1, show_pc_tri=False, show_axes=False):
         G = Graphics()
         lines = []
         labels = []
@@ -628,11 +634,10 @@ class Triangulation:
             a = seg.endpoint(0).cif()
             b = seg.endpoint(1).cif()
             c = (a + b)/2
-            a1 = (2*(b - c)/seg.length())*arrow_size*(exp(5*pi*I/6)) + c
-            a2 = (2*(b - c)/seg.length())*arrow_size*(exp(-5*pi*I/6)) + c
-            l = (2*(b - c)/seg.length())*1.5*arrow_size*(exp(pi*I/3)) + c
 
-
+            a1 = ((2*(b - c)/seg.length())*arrow_size*(exp(5*RIF(pi)*I/6)))/100 + c
+            a2 = ((2*(b - c)/seg.length())*arrow_size*(exp(-5*RIF(pi)*I/6)))/100 + c
+            l = ((2*(b - c)/seg.length())*3*arrow_size*(exp(RIF(pi)*I/3)))/200 + c
 
             ### for some reason Sage will not plot a line if its endpoints are elements of the ComplexIntervalField
             ### with imaginary part =0. So, as a somewhat hacky workaround we'll just add a very small multiple of I

@@ -49,6 +49,11 @@ def collapse_edge(CTri, edge_index):
 
     degree = v_top.degree()
 
+    # isotope all multi-arcs off of e and through v_top (the material vertex)
+    for key in T.multi_arcs():
+        M = T.multi_arc(key)
+        M.isotope_through_vertex(e.index(), v_top.index())
+
     # cyclically re-order the spoke edges so that e.signed_rep(sign) is the 0th edge, where
     # sign=1 if e is oriented downward, and sign=-1 otherwise.
     spokes = [spokes[(e_index+i)%degree] for i in range(len(spokes))]
@@ -61,6 +66,40 @@ def collapse_edge(CTri, edge_index):
     triangles = list(T._triangles)
     triangles.remove(incident_triangles[0])
     triangles.remove(incident_triangles[-1])
+
+    # for each edge that we will remove from T, delete all intersections of multi-arcs with that edge.
+    # Since we have already isotoped all multi-arcs off of the collapsing edge, the number of intersections
+    # with edges that will stay around won't change. If we just pop the intersections from the intersection_sequence,
+    # then the result will be correct since elements of an intersection_sequence are referenced edges, which will
+    # re-labeled later (after they are re-labeled, we'll have to re-compute the geometric and algebraic
+    # intersection vectors.
+    for key in T.multi_arcs():
+        M = T.multi_arc(key)
+        for arc in M.arcs():
+            while spokes[0] in arc.intersection_sequence():
+                arc._intersection_sequence.remove(spokes[0])
+            while spokes[0].opp_signed_edge() in arc.intersection_sequence():
+                arc._intersection_sequence.remove(spokes[0].opp_signed_edge())
+            if degree > 2:
+                while spokes[1] in arc.intersection_sequence():
+                    arc._intersection_sequence.remove(spokes[1])
+                while spokes[1].opp_signed_edge() in arc.intersection_sequence():
+                    arc._intersection_sequence.remove(spokes[1].opp_signed_edge())                
+                while spokes[-1] in arc.intersection_sequence():
+                    arc._intersection_sequence.remove(spokes[-1])
+                while spokes[-1].opp_signed_edge() in arc.intersection_sequence():
+                    arc._intersection_sequence.remove(spokes[-1].opp_signed_edge())                
+            elif degree == 2:
+                while e_bot_left in arc.intersection_sequence():
+                    arc._intersection_sequence.remove(e_bot_left)
+                while e_bot_left.opp_signed_edge() in arc.intersection_sequence():
+                    arc._intersection_sequence.remove(e_bot_left.opp_signed_edge())                
+                while e_bot_right in arc.intersection_sequence():
+                    arc._intersection_sequence.remove(e_bot_right)
+                while e_bot_right.opp_signed_edge() in arc.intersection_sequence():
+                    arc._intersection_sequence.remove(e_bot_right.opp_signed_edge())
+            arc._remove_bigons()
+            arc._remove_end_bigons()
 
     # remove the edge e, and the upper-left and upper-right edge of the square spanned by e.
     edges = list(T._edges)
@@ -168,6 +207,11 @@ def collapse_edge(CTri, edge_index):
         t = triangles[i]
         t._index = i
     T._triangles = tuple(triangles)
+
+    # re-compute the geometric and algebraic intersection vectors for multi-arcs of T
+    for key in T.multi_arcs():
+        M = T.multi_arc(key)
+        M._recompute_intersection_vectors()
 
     # make sure the resulting triangulation makes sense
     labels = [triangle.signed_edge(i).label() for triangle in T.triangles() for i in range(3)]

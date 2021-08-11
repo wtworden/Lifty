@@ -23,6 +23,7 @@ from sage.all import tan
 from sage.all import I
 from sage.all import PermutationGroupElement
 from sage.all import RibbonGraph
+from sage.all import flatten
 
 from sage.misc.misc import SAGE_TMP
 
