@@ -185,6 +185,9 @@ class CEdge():
         self._positive_rep = None
         self._negative_rep = None
 
+    def triangulation(self):
+        return self._triangulation
+
     def signed_rep(self, sign):
         if sign == 1:
             return self._positive_rep
@@ -233,6 +236,9 @@ class SignedEdge():
         else:
             return self._parent_edge.positive_rep()
 
+    def triangulation(self):
+        return self.parent_edge().triangulation()
+
     def label(self):
         return self._index if self._sign==1 else ~int(self._index)
 
@@ -252,6 +258,11 @@ class SignedEdge():
         return self.parent_edge().vertex(index)
 
     def adjacent_triangle(self):
+        if self._adjacent_triangle == None:
+            T = self.triangulation()
+            for t in T.triangles():
+                if self in t.signed_edges():
+                    self._adjacent_triangle = t
         return self._adjacent_triangle
 
     def __repr__(self):
@@ -366,26 +377,30 @@ class Arc():
             for t in T.triangles():
                 if v0 in t.vertices():
                     e_opp = t.opp_signed_edge(v0)
-                    e_left = t.edge((t.signed_edges().index(e_opp)+1)%3)
-                    e_right = t.edge((t.signed_edges().index(e_opp)+2)%3)
+                    e_left = t.signed_edge((t.signed_edges().index(e_opp)+1)%3)
+                    e_right = t.signed_edge((t.signed_edges().index(e_opp)+2)%3)
                     a = self._geometric[e_opp.index()]
                     b = self._geometric[e_left.index()]
                     c = self._geometric[e_right.index()]
+                    # if a > b+c, then a has at least one intersection that does not meet b or c immediately
+                    # before/after. So it is either the first edge the arc intersects, or the last, or both.
                     if a > b + c:
-                        # make sure this is the first edge, rather than the last
-                        if (self._algebraic[e_opp.index()] - self._algebraic[e_right.index()] + self._algebraic[e_left.index()]) == e_opp.sign():
+                        print(e_opp.label(), e_right.index(), e_left.index())
+                        # now make sure this is the first edge, rather than the last. The signed_sum below will be 1 if e_opp
+                        # has an extra intersection leaving t (so it's the first edge), and (given that a>b+c) will be 0 
+                        # if there is an extra intersection in both directions (so it's both the first and the last edge). 
+                        signed_sum = e_opp.sign()*self._algebraic[e_opp.index()] + e_right.sign()*self._algebraic[e_right.index()] + e_left.sign()*self._algebraic[e_left.index()]
+                        if signed_sum in [0,1]:
+                            print(e_opp.label())
                             self._intersection_sequence.append(e_opp)
-                        # if the arc has the same initial and terminal vertex, and the first and last edge it meets are also
-                        # the same, then the above if statement won't catch it. So we need to do this:
-                        if a - (b+c) == 2:
-                            self._intersection_sequence.append(e_opp)
+
                         exit_edge = e_opp
                         enter_edge = e_opp.opp_signed_edge()
                         next_triangle = enter_edge.adjacent_triangle()
                         position = b
-                        print(exit_edge, enter_edge, next_triangle,position)
                         break
             while exit_edge != None:
+                print(exit_edge, enter_edge, next_triangle,position)
                 t = next_triangle
                 e_right = t.signed_edge((t.signed_edges().index(enter_edge)+1)%3)
                 e_left = t.signed_edge((t.signed_edges().index(enter_edge)+2)%3)

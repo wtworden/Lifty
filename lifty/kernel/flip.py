@@ -111,10 +111,6 @@ def flip_edge(CTri, edge_index):
             arc._algebraic[e.index()] = alg
             arc._geometric[e.index()] = geom
 
-            # now re-compute the intersection_sequence
-            arc._compute_intersection_sequence()
-
-
     # now we flip e
     e._vertices = tuple([v2, v4])
 
@@ -127,12 +123,27 @@ def flip_edge(CTri, edge_index):
     t1._vertices = tuple([v3, v2, v4])
     t2._vertices = tuple([v1, v4, v2])
 
-
     # reset vertex incident edges and vertex degree to None. These will be recomputed and 
     # cached the next time the methods are called.
     for v in [v1, v2, v3, v4]:
         v._incident_edges = None
         v._degree = None
+
+    # reset adjacent triangles for affected signed edges to None. These will be recomputed
+    # and chached the next time they're called.
+    e1._adjacent_triangle = None
+    e2._adjacent_triangle = None
+    e3._adjacent_triangle = None
+    e4._adjacent_triangle = None
+    e_pos._adjacent_triangle = None
+    e_neg._adjacent_triangle = None
+
+
+    # now re-compute the intersection_sequences for all arcs
+    for key in T.multi_arcs():
+        M = T.multi_arc(key)
+        for arc in M.arcs():    
+            arc._compute_intersection_sequence()
 
     # make sure the resulting triangulation makes sense
     labels = [triangle.signed_edge(i).label() for triangle in T.triangles() for i in range(3)]
