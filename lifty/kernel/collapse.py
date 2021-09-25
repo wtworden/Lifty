@@ -224,16 +224,18 @@ def collapse_edge(CTri, edge_index):
 def collapse_to_ideal(CTri):
     T = CTri
     T_copy = copy.deepcopy(T)
+    edge_list = []
 
     collapsible = T_copy.collapsible_edges()
 
     while len(collapsible) > 0:
+        edge_list.append(collapsible[0])
         _ = T_copy.collapse_edge(collapsible[0].index())
         collapsible = T_copy.collapsible_edges()
 
     assert all([v.is_ideal() for v in T_copy.vertices()])
 
-    return T_copy
+    return T_copy, edge_list
 
 
 

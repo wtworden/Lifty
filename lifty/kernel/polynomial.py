@@ -4,7 +4,7 @@ import random
 import itertools as it
 import sys
 
-from lifty.kernel.triangulation import Point, Segment, Edge, MarkedEdge, Vertex, MarkedVertex, Triangulation, LiftedTriangulation
+from lifty.kernel.triangulation import Point, Segment, Edge, Vertex, Triangulation, LiftedTriangulation
 from lifty.constants import RABBIT, CORABBIT, AIRPLANE
 from lifty.kernel.errors import IntervalError, IterationError, SubdivisionError
 
@@ -145,6 +145,7 @@ class TopPoly:
         return self._postcritical_set
 
 
+
     def pc_triangulation(self):
         """Return a triangulation whose vertices are the postcritical set. This will always be a piecewise
             linear triangulation (each edge is a single line segment). Note that at this point 
@@ -159,7 +160,7 @@ class TopPoly:
                 for j in range(i+1,L):
                     a,b = pcs[i], pcs[j]
                     v,w = vertices[i], vertices[j]
-                    e = Edge([v,w],[a,b], self)
+                    e = Edge([v,w],[a,b])
                     s = e.segment(0)
                     if e not in edge_list:
                         to_trash = False
@@ -405,6 +406,9 @@ class TopPoly:
         return lifted_edges
 
     def lifted_tri(self):
+        return self.lifted_triangulation()
+
+    def lifted_triangulation(self):
         """Return the lift of the triangulation self.pc_triangulation(). As self.pc_triangulation() does not include 
             edges with endpoint at infinity, this one won't either. Results are cached.
         """
@@ -422,7 +426,7 @@ class TopPoly:
                 p = v.point()
                 p_lifts = self.lifts(p)
                 for P in p_lifts:
-                    vertices.append(MarkedVertex(P,v))
+                    vertices.append(Vertex(P,v.index()))
 
 
             vertex_pts = [v.point() for v in vertices]
@@ -437,7 +441,7 @@ class TopPoly:
                     points[0] = vertices[j].point()
                     points[-1] = vertices[k].point()
                     subvertices += points[1:-1]
-                    edge = MarkedEdge([v,w],points, i, None)
+                    edge = Edge([v,w],points, i, None)
                     all_edges.append(edge)
 
 
@@ -495,6 +499,32 @@ class TopPoly:
             T.add_edges_to_infinity()
             self._lifted_tri = T
         return self._lifted_tri
+
+    def invariant_tree(self):
+        pass
+
+        T = self.pc_triangulation()
+        L = self.lifted_triangulation()
+        TCom = T.combinatorial()
+        LCom = L.combinatorial()
+
+        LCom_collapsed, collapse_list = LCom.collapse_to_ideal()
+
+        LCom_flipped_to_pc, flip_list = LCom_collapsed.flip_to_pc_tri()
+
+        
+
+
+        ###
+        # 1. compute the pc_triangulation and lifted triangulation, then combinatorilize
+        # 2. Find sequence of collapses and flips that take the lifted_tri to the pc_tri
+        # 3. Encode the lifting map on arcs combinatorially
+        # 4. choose a filling arc system A and encode it in combinatorial pc_tri.
+        # 5. Lift A to lifted_tri, track it through collapses/flips to get A'
+        # 6. Check to see if the Hubbard tree is in a 2-nbhd of A'.
+        # 7. If #6 gives No, check for obstruction.
+        # 8. If #7 gives No, rename A' to A, go to #5.
+
 
 def make_intervals_disjoint(points, max_precision):
     for i in range(len(points)-1):

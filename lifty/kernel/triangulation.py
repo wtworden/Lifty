@@ -299,7 +299,7 @@ class Triangulation:
                         v,w = self.vertices()[j], self.vertices()[-1]
                         lift[0] = v.point()
                         lift[-1] = w.point()
-                        edge = MarkedEdge([v,w],lift,e.index(),next_edge_index)
+                        edge = Edge([v,w],lift,e.index(),next_edge_index)
                         self._edges.append(edge)
                         next_edge_index += 1
                 for i in range(len(self.finite_vertices())):
@@ -340,7 +340,7 @@ class Triangulation:
         if self._combinatorial is None:
             triangles = []
             edges = {}
-            c_vertices = [CVertex(i) for i in range(len(self.vertices()))]
+            c_vertices = [CVertex(i, self.vertex(i).maps_to()) for i in range(len(self.vertices()))]
 
             # start with an edge, then build the triangles adjacent to the positive and negative reps
             # of the edge, but only if the triangle hasn't already been built (i.e., if the label does
@@ -363,7 +363,7 @@ class Triangulation:
                         # if the opposite sign label (~label) is already in edges, then we don't want to create a new edge,
                         # but rather just point label to the edge that ~label points to.
                         if ~label not in edges:
-                            edges[label] = CEdge(ind,[c_vertices[e0.vertex(0).index()], c_vertices[e0.vertex(1).index()]])
+                            edges[label] = CEdge(ind, [c_vertices[e0.vertex(0).index()], c_vertices[e0.vertex(1).index()]], e0.maps_to())
                         else:
                             edges[label] = edges[~label]
 
@@ -397,7 +397,7 @@ class Triangulation:
 
                             # create the CEdge if we haven't already created it with ~label
                             if ~label not in edges:
-                                edges[label] = CEdge(ind,[c_vertices[e0.vertex(0).index()], c_vertices[e0.vertex(1).index()]])
+                                edges[label] = CEdge(ind, [c_vertices[e0.vertex(0).index()], c_vertices[e0.vertex(1).index()]], e0.maps_to())
                             else:
                                 edges[label] = edges[~label]
                             tri_edges.append(edges[label])
@@ -420,12 +420,8 @@ class Triangulation:
                     vertex_markings[i] = [False, False]
                 if  v.point().is_infinity():
                     vertex_markings[i][1] = True
-            if self.is_lifted_tri():
-                vertex_mappings = [v.maps_to().index() for v in self.vertices()]
-            else:
-                edge_mappings = None
-                vertex_mappings = None
-            self._combinatorial = CTriangulation(triangles, c_vertices, vertex_markings, vertex_mappings, self.is_lifted_tri())
+
+            self._combinatorial = CTriangulation(triangles, c_vertices, vertex_markings, self.is_lifted_tri())
         
         # encode the edges of the postcritical triangulation as a multi-arc in this combinatorial triangulation
         if self._is_lifted:
@@ -561,7 +557,7 @@ class Triangulation:
                 arcs.append(arc)
             multi_arc = MultiArc(arcs)
 
-        self._combinatorial._multi_arcs['pc_tri'] = multi_arc
+            self._combinatorial._multi_arcs['pc_tri'] = multi_arc
 
         return self._combinatorial
 
@@ -691,12 +687,12 @@ class LiftedTriangulation(Triangulation):
 
         self._pc_triangulation = top_poly.pc_triangulation()
         self._is_lifted = True
-        self._vertices[-1] = MarkedVertex(Point(Infinity), self._pc_triangulation.vertices()[-1], self._vertices[-1].index())
+        self._vertices[-1] = Vertex(Point(Infinity), self._pc_triangulation.vertices()[-1].index(), self._vertices[-1].index())
 
 
 
 class Edge:
-    def __init__(self, vertices, points, index = None):
+    def __init__(self, vertices, points, maps_to=None, index = None):
         self._vertices = vertices
         self._points = points
         assert self._points[0] == self._vertices[0].point()
@@ -711,6 +707,7 @@ class Edge:
         self._segments = tuple([Segment([self._finite_points[i],self._finite_points[i+1]], self) for i in range(len(self._finite_points)-1)])
         self._index = index
         self._triangulation = None
+        self._maps_to = maps_to
 
     def triangulation(self):
         return self._triangulation
@@ -751,22 +748,18 @@ class Edge:
     def index(self):
         return self._index
 
+    def maps_to(self):
+        '''Returns the index of the edge of the pc_triangulation that this edge maps to, if this is
+            an edge of the lifted_triangulation. Returns None if the is an edge of the pc_triangulation.
+        '''
+        return self._maps_to
+
     def subdivide_segment(self, seg_indx, subdivision_point):
         self._segments[seg_indx] = Segment([self.segment(seg_indx).endpoint(0),subdivision_point], self)
         self._segments.insert(seg_indx+1, Segment([subdivision_point, self.segment(seg_indx).endpoint(1)], self))
 
         self._points.insert(seg_indx+1, subdivision_point)
 
-
-
-class MarkedEdge(Edge):
-    def __init__(self, vertices, points, maps_to, index=None):
-        Edge.__init__(self, vertices, points, index)
-
-        self._maps_to = maps_to
-
-    def maps_to(self):
-        return self._maps_to
 
 class Ray:
     def __init__(self, endpoints, edge):
@@ -897,12 +890,13 @@ class Segment:
 
 
 class Vertex:
-    def __init__(self, point, index=None, incident_edges=[]):
+    def __init__(self, point, maps_to=None, index=None, incident_edges=[]):
 
         self._point = point
         self._index = index
         self._incident_edges = incident_edges
         self._triangulation = None
+        self._maps_to = maps_to
 
     def triangulation(self):
         return self._triangulation
@@ -919,6 +913,12 @@ class Vertex:
     def incident_edges(self):
         return self._incident_edges
 
+    def maps_to(self):
+        '''Returns the index of the vertex of the pc_triangulation that this vertex maps to, if this is
+            a vertex of the lifted_triangulation. Returns None if the is a vertex of the pc_triangulation.
+        '''
+        return self._maps_to
+
     def __eq__(self,other):
         return self.point() == other.point()
 
@@ -928,14 +928,6 @@ class Vertex:
     def __repr__(self):
         return self.point().__repr__()
 
-class MarkedVertex(Vertex):
-    def __init__(self, point, maps_to, index=None, incident_edges=[]):
-        Vertex.__init__(self, point, index, incident_edges)
-
-        self._maps_to = maps_to
-
-    def maps_to(self):
-        return self._maps_to
 
 
 class Point:

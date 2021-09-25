@@ -154,4 +154,39 @@ def flip_edge(CTri, edge_index):
     return True
 
 def flip_to_pc_tri(CTri):
-    pass
+    assert not CTri.has_material_vertices()
+    T = copy.deepcopy(CTri)
+
+    pc_multi_arc = T.multi_arc('pc_tri')
+
+    # we'll keep track of the sequence of edge flips we do here
+    flips = []
+
+    # get arcs that intersect T
+    arcs = [a for a in pc_multi_arc.arcs() if sum(a.geometric()) > 0]
+
+    while len(arcs) > 0:
+        arc = arcs[0]
+        while len(arc.intersection_sequence()) > 0:
+            to_flip = arc.intersection_sequence()[0].index()
+            flips.append(to_flip)
+            _ = flip_edge(T, to_flip)
+        arcs = [a for a in pc_multi_arc.arcs() if sum(a.geometric()) > 0]
+
+    return T, flips
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

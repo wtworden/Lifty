@@ -6,7 +6,7 @@ from lifty.sage_types import flatten
 
 
 class CTriangulation():
-    def __init__(self, triangles, vertices, vertex_markings, vertex_mappings, is_lifted_tri):
+    def __init__(self, triangles, vertices, vertex_markings, is_lifted_tri):
         self._is_lifted_tri = is_lifted_tri
         self._triangles = tuple(triangles)
 
@@ -30,8 +30,7 @@ class CTriangulation():
             v._triangulation = self
             v._is_postcritical = vertex_markings[i][0]
             v._is_ideal = vertex_markings[i][1]
-            if self._is_lifted_tri:
-                v._maps_to = vertex_mappings[i]
+
 
         self._multi_arcs = {}
 
@@ -71,6 +70,12 @@ class CTriangulation():
     def __repr__(self):
         return str(self._triangles)
 
+    def has_material_vertices(self):
+        for v in self.vertices():
+            if not v.is_ideal():
+                return True
+        return False
+
     def is_flippable(self, edge_index):
         e = self.edge(edge_index)
         if e.vertex(0).degree() > 1 and e.vertex(1).degree() > 1:
@@ -81,6 +86,9 @@ class CTriangulation():
 
     def flip_edge(self, edge_index):        
         return flip.flip_edge(self, edge_index)
+
+    def flip_to_pc_tri(self):
+        return flip.flip_to_pc_tri(self)
 
 
     def is_collapsible(self,edge_index):
@@ -177,13 +185,14 @@ class CTriangle():
         return str(self._signed_edges)
 
 class CEdge():
-    def __init__(self, index, vertices):
+    def __init__(self, index, vertices, maps_to=None):
         self._index = index
         self._vertices = tuple(vertices)
         self._triangulation = None
 
         self._positive_rep = None
         self._negative_rep = None
+        self._maps_to = maps_to
 
     def triangulation(self):
         return self._triangulation
@@ -193,6 +202,12 @@ class CEdge():
             return self._positive_rep
         else:
             return self._negative_rep
+
+    def maps_to(self):
+        '''Returns the index of the edge of the pc_triangulation that this edge maps to, if this is
+            an edge of the lifted_triangulation. Returns None if the is an edge of the pc_triangulation.
+        '''
+        return self._maps_to
 
     def positive_rep(self):
         return self._positive_rep
@@ -272,14 +287,14 @@ class SignedEdge():
         return self.opp_signed_edge()
 
 class CVertex():
-    def __init__(self, index):
+    def __init__(self, index, maps_to):
         self._index = index
         self._is_postcritical = None
         self._is_ideal = None
         self._triangulation = None
         self._degree = None
         self._incident_edges = None
-        self._maps_to = None
+        self._maps_to = maps_to
 
     def triangulation(self):
         return self._triangulation
@@ -321,6 +336,9 @@ class CVertex():
 
 
     def maps_to(self):
+        '''Returns the index of the vertex of the pc_triangulation that this vertex maps to, if this is
+            a vertex of the lifted_triangulation. Returns None if the is a vertex of the pc_triangulation.
+        '''
         return self._maps_to
 
     def is_postcritical(self):
