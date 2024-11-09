@@ -3,10 +3,12 @@ from lifty.sage_types import *
 import random
 import itertools as it
 import sys
+import copy
 
 from lifty.kernel.triangulation import Point, Segment, Edge, Vertex, Triangulation, LiftedTriangulation
 from lifty.constants import RABBIT, CORABBIT, AIRPLANE
 from lifty.kernel.errors import IntervalError, IterationError, SubdivisionError
+from lifty.kernel.combinatorial_tri import Arc, MultiArc
 
 COLORS = ['blue','red','green','cyan','black','grey','pink','purple','orange','brown','limegreen','olive']
 
@@ -292,7 +294,6 @@ class TopPoly:
         Q = self.derivative()
         a,b = edge.point(0), edge.point(1)
         a_lifts, b_lifts = self.lifts(a), self.lifts(b)
-        #print(a_lifts,b_lifts)
         make_intervals_disjoint(a_lifts, self.max_precision())
         make_intervals_disjoint(b_lifts, self.max_precision())
         
@@ -304,7 +305,6 @@ class TopPoly:
         ## from A is the number of lifts of c that are D-close to A.
         t = QQbar(1)/100000
         def init_edge(t, lifted_edges):
-            #print('entering init_edge')
             c = Point(b.alg()*t + (1-t)*a.alg())
             c_lifts = self.lifts(c)
             for A in a_lifts:
@@ -323,7 +323,6 @@ class TopPoly:
         ## we extend the lift of each edge one segment at a time, until we have the full lift. Each
         ## iteration of below function extends by one segment. 
         def extend_edges(t, dt, interval, lifted_edges, finished):
-            #print('entering extend_edges')
             s1 = Point(b.alg()*t + (1-t)*a.alg())
             s2 = Point(b.alg()*(t+dt)+(1-(t+dt))*a.alg())
             lifted_segs = []
@@ -501,7 +500,7 @@ class TopPoly:
         return self._lifted_tri
 
     def invariant_tree(self):
-        pass
+        
 
         T = self.pc_triangulation()
         L = self.lifted_triangulation()
@@ -512,7 +511,158 @@ class TopPoly:
 
         LCom_flipped_to_pc, flip_list = LCom_collapsed.flip_to_pc_tri()
 
+        # LCom_flipped_to_pc is isometric to T, but with edges labelled differently.
+        # So we need a dictionary to maps each edge of LCom_flipped_to_pc to the isotopic 
+        # edge of T. We also need the dictionary to tell us if the two edges are oriented the same.
+        # We use the fact that lifting, collapsing and flipping are done in such a way that the 
+        # vertex indices of post-critical vertices is preserved. So the indexing of vertices 
+        # will be the same for T, L, TCom, LCom, LCom_collapsed, and LCom_flipped_to_pc.
+        # Since T is constructed is such a way that edges of T are uniquely defined by their
+        # vertices, we can use this to identify edges of T with edges of LCom_flipped_to_pc.
         
+        edge_map = {}
+
+        T_edge_verts = {(e.vertex(0).index(), e.vertex(1).index()):e for e in T.edges()}
+        LCom_flipped_edge_verts = {(e.vertex(0).index(), e.vertex(1).index()):e for e in LCom_flipped_to_pc.edges()}
+
+        for (a,b) in LCom_flipped_edge_verts:
+            if (a,b) in T_edge_verts:
+                edge_map[LCom_flipped_edge_verts[(a,b)].index()] = (T_edge_verts[(a,b)].index(),True)
+            else:
+                edge_map[LCom_flipped_edge_verts[(a,b)].index()] = (T_edge_verts[(b,a)].index(),False)
+
+        def transfer_multi_arc(CTri, edge_map, multi_arc):
+            intersection_sequence = []
+            M = multi_arc
+            arcs = []
+            for arc in M.arcs():
+                intersection_sequence = []
+                for e in arc.intersection_sequence():
+                    sign = e.sign()
+                    if edge_map[e.index()][1] == False:
+                        sign *= -1
+                    if sign == 1:
+                        intersection_sequence.append(edge_map[e.index()][0])
+                    elif sign == -1:
+                        intersection_sequence.append(-edge_map[e.index()][0]-1)
+                arcs.append(Arc(CTri,[arc.vertex(0).index(),arc.vertex(1).index()],[],[],intersection_sequence))
+            M0 = MultiArc(arcs)
+            CTri.add_multi_arc(M0,'tree')
+
+
+        def iterate_lifting(TCom, LCom, collapse_list, flip_list, edge_map):
+
+            # we will work with a copy of LCom
+            L = copy.deepcopy(LCom)
+
+            #first we lift the multi_arc 'tree' to LCom
+            M = TCom.multi_arc('tree')
+            arcs = []
+            for arc in M.arcs():
+                algebraic = arc.algebraic()
+                geometric = arc.geometric()
+                lifted_algebraic = [0 for i in range(L.num_edges())]
+                lifted_geometric = [0 for i in range(L.num_edges())]
+                for i in range(L.num_edges()):
+                    e = L.edge(i).maps_to()
+                    lifted_geometric[i] = geometric[e]
+                    lifted_algebraic[i] = algebraic[e]
+                arcs.append(Arc(L,[L.num_vertices()-1, L.num_vertices()-1], lifted_algebraic, lifted_geometric))
+            M_lifted = MultiArc(arcs)
+            L.add_multi_arc(M_lifted,'tree')
+
+            print(L)
+            print(L.multi_arc('tree'))
+
+            # now collapse LCom to an ideal triangulation
+            for edge in collapse_list:
+                L.collapse_edge(edge)
+
+            # now flip LCom to pc_triangulation
+            for edge in flip_list:
+                L.flip_edge(edge)
+
+            # now transfer the multi_arc 'tree' from L to TCom.
+            transfer_multi_arc(TCom, edge_map, L.multi_arc('tree'))
+
+            return TCom
+
+        a0 = Arc(TCom,[TCom.num_vertices()-1,TCom.num_vertices()-1],[],[],[-1,-3,-2])
+        a1 = Arc(TCom,[TCom.num_vertices()-1,TCom.num_vertices()-1],[],[],[1,-5])
+        a2 = Arc(TCom,[TCom.num_vertices()-1,TCom.num_vertices()-1],[],[],[4,2,3])
+        a3 = Arc(TCom,[TCom.num_vertices()-1,TCom.num_vertices()-1],[],[],[-4,0])
+        a4 = Arc(TCom,[TCom.num_vertices()-1,TCom.num_vertices()-1],[],[],[-4,-3,-2])
+        M = MultiArc([a0,a1,a2,a3,a4])
+        TCom.add_multi_arc(M,'tree')
+        print(TCom)
+        print(TCom.multi_arc('tree'))
+
+        for i in range(5):
+            TCom = iterate_lifting(TCom, LCom, collapse_list, flip_list, edge_map)
+            print(TCom)
+            print(TCom.multi_arc('tree'))
+        #def relabel_edges(CTri, edge_map):
+        #    # fix _signs for each triangle according to orientation of edges of T
+        #    for triangle in CTri.triangles():
+        #        signs = list(triangle._signs)
+        #        for i in range(3):
+        #            if not edge_map[triangle.edge(i).index()][1]:
+        #                signs[i] = triangle._signs[i]*(-1)
+        #        triangle._signs = tuple(signs)
+        #    # clear incident edges for each vertex (will be recomputed on next call)
+        #    for v in CTri.vertices():
+        #        v._incident_edges = None
+    #
+        #    # re-index edges of LCom_flipped_to_pc according to edge_map
+        #    for edge in CTri.edges():
+        #        if not edge_map[edge.index()][1]:
+        #            v0,v1 = edge.vertex(0), edge.vertex(1)
+        #            edge._vertices = (v1,v0)
+        #        #clear adjacent triangles of positive and negative reps (will be recomputed on next call)
+        #        edge.positive_rep()._adjacent_triangle = None
+        #        edge.negative_rep()._adjacent_triangle = None
+        #        edge._index = edge_map[edge.index()][0]
+#
+        #    # fix multi-arc edge intersection info
+        #    num_edges = CTri.num_edges()
+        #    for key in CTri.multi_arcs():
+        #        M = CTri.multi_arc(key)
+        #        for a in M.arcs():
+        #            intersection_sequence = []
+        #            for e in a.intersection_sequence():
+        #                if edge_map[e.index()][1] == True:
+        #                    intersection_sequence.append(e)
+        #                else:
+        #                    intersection_sequence.append(e.opp_signed_edge())
+        #            a._intersection_sequence = intersection_sequence
+        #            a._recompute_intersection_vectors()
+
+
+        return TCom
+
+
+        # Now LCom_flipped_to_pc should have edges with indices and orientations the same as T
+
+        # We need to create a filling multi-arc with all vertices at infinity in TCom, to initialize
+        # the invariant tree. There is an easy way to do this: For each vertex v of TCom with an edge to 
+        # infinity (such a vertex is distance 1 from inf), put an arc from inf, around v, and back to inf. 
+        #Then for each vertex v that has an edge to a distance 1 vertex (such a vertex is distance 2 from inf),
+        # put an edge that tracks first the edge from infinity, then the edge to v, then goes around v 
+        # and tracks the two edges back to infinity. Continue in this way (i.e., next do all vertices 
+        # that are distance 3 from infinity, etc.). When this process terminates, some subset of the arcs 
+        # are "outermost arcs" with respect to this iterative process, and these outermost arcs are cyclically
+        # ordered around the vertex at infinity, and we may number them 1 to n based on this ordering (note
+        # that this numbering is only well-defined up to cyclic permutation). Now for each even k, 1<k<n, 
+        # put a new arc starting between arc n and arc 1, and ending between arc k and k+1. For a given k,
+        # such an arc will intersect every edge that has one vertex among those enclosed by arcs 1,2,...,k,
+        # and another vertex among those enclosed by arcs k+1,...,n.
+
+
+
+
+            
+
+
 
 
         ###
@@ -537,7 +687,6 @@ def make_intervals_disjoint(points, max_precision):
                     p.set_precision(prec)
                     q.set_precision(prec)
                 else:
-                    print(p,q)
                     raise IntervalError('max precision reached: two of the points are too close together to be distinguished by intervals.')
 
 
@@ -582,4 +731,45 @@ def quadratic(type):
         return TopPoly([1,0,AIRPLANE])
     else:
         return 'Error: type must be \'rabbit\', \'corabbit\', or \'airplane\'.'
+
+
+
+#def relabel_edges(CTri, edge_map):
+#    # fix _signs for each triangle according to orientation of edges of T
+#    for triangle in CTri.triangles():
+#        edges = triangle.edges()
+#        signs = list(triangle._signs)
+#        for i in range(3):
+#            if not edge_map[triangle.edge(i).index()][1]:
+#                signs[i] = triangle._signs[i]*(-1)
+#        triangle._signs = tuple(signs)
+#        triangle._initialize_signed_edges_and_vertices(edges)
+#    # clear incident edges for each vertex (will be recomputed on next call)
+#    for v in CTri.vertices():
+#        v._incident_edges = None
+#    # re-index edges of LCom_flipped_to_pc according to edge_map
+#    for edge in CTri.edges():
+#        if not edge_map[edge.index()][1]:
+#            v0,v1 = edge.vertex(0), edge.vertex(1)
+#            edge._vertices = (v1,v0)
+#        #clear adjacent triangles of positive and negative reps (will be recomputed on next call)
+#        edge.positive_rep()._adjacent_triangle = None
+#        edge.negative_rep()._adjacent_triangle = None
+#        edge._index = edge_map[edge.index()][0]
+#    # fix multi-arc edge intersection info
+#    num_edges = CTri.num_edges()
+#    for key in CTri.multi_arcs():
+#        M = CTri.multi_arc(key)
+#        for a in M.arcs():
+#            intersection_sequence = []
+#            for e in a.intersection_sequence():
+#                if edge_map[e.index()][1] == True:
+#                    intersection_sequence.append(e)
+#                else:
+#                    intersection_sequence.append(e.opp_signed_edge())
+#            a._intersection_sequence = intersection_sequence
+#            a._recompute_intersection_vectors()
+
+
+
 

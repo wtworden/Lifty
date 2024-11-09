@@ -229,7 +229,7 @@ def collapse_to_ideal(CTri):
     collapsible = T_copy.collapsible_edges()
 
     while len(collapsible) > 0:
-        edge_list.append(collapsible[0])
+        edge_list.append(collapsible[0].index())
         _ = T_copy.collapse_edge(collapsible[0].index())
         collapsible = T_copy.collapsible_edges()
 

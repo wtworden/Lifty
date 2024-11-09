@@ -60,6 +60,7 @@ def flip_edge(CTri, edge_index):
     v2 = t1.opp_vert(e)
     v4 = t2.opp_vert(e)
 
+
     # adjust multi-arc intersection info
     for key in T.multi_arcs():
         M = T.multi_arc(key)
@@ -81,6 +82,23 @@ def flip_edge(CTri, edge_index):
             # now look through the intersection sequence for patterns that indicate that the new edge
             # will have an intersection. Basically, we just exhaust all possible sub-arcs types that
             # would intersect e post-flipping.
+
+    #             v3                                 v3                                                 
+    #             o                                  o                                                  
+    #            /|\                                / \                                                     
+    #       e2 /  |  \ e3                      e2 / t1  \ e3                                           
+    #        /    |    \                        /         \                                                
+    #      /      |e     \                    /    e        \                                                
+    #  v2 o   t1  |   t2  o v4   ---->    v2 o------->-------o v4                                                          
+    #      \      ^      /                    \             /                                                     
+    #        \    |    /                        \    t2   /                                                               
+    #       e1 \  |  / e4                      e1 \     / e4                                                       
+    #            \|/                                \ /                                                         
+    #             o                                  o                                                      
+    #             v1                                 v1                                                     
+    #
+
+
             for i in range(len(arc.intersection_sequence())):
                 edge = arc.intersection_sequence()[i]
                 if i == 0:
@@ -177,6 +195,9 @@ def flip_to_pc_tri(CTri):
 
 
 
+def do_flip_sequence(CTri,flips,edge_map):
+    for edge_index in flips:
+        _ = flip_edge(CTri,edge_index)
 
 
 

@@ -423,141 +423,140 @@ class Triangulation:
 
             self._combinatorial = CTriangulation(triangles, c_vertices, vertex_markings, self.is_lifted_tri())
         
-        # encode the edges of the postcritical triangulation as a multi-arc in this combinatorial triangulation
-        if self._is_lifted:
-            pc_tri = self._pc_triangulation
-            arcs = []
-            self_copy = deepcopy(self)
-            eps = QQbar(QQ(1)/(10**(int(-log(min([seg.length() for edge in self_copy.edges() for seg in edge.segments()]).center()/1000,10)))))
-            min_angle = self_copy.min_vertex_angle()
-            vertices = [[None,None] for i in range(pc_tri.num_edges())]
-            for pc_edge in pc_tri.edges():
-                assert pc_edge.num_segments() == 1
-                for i in range(2):
-                    a = pc_edge.vertex(i).point().alg()
-                    for j in range(self.num_vertices()):
-                        v = self.vertex(j)
-                        if a == v.point().alg():
-                            vertices[pc_edge.index()][i] = j
-                pc_edge_seg = pc_edge.segment(0)
-
-                # first we'll make self_copy transverse to pc_edge, in such a way that every segment of self_copy
-                # is transverse to pc_edge (i.e., no endpoint of a segment lies on pc_edge, except of course at
-                # the vertices of pc_edge).
-
-
-                for e in self_copy.edges():
-                    for i in range(len(e.points())):
-                        p = e.point(i)
-                        # if p in on pc_edge but is not at one of its vertices...
-                        if pc_edge_seg.on_seg(p) and not ( p==pc_edge.vertex(0).point() or p==pc_edge.vertex(1).point() ):
-
-                            # push p off of pc_edge_seg to the left (relative to orientation of pc_edge_seg) by eps. By
-                            # definition eps is about .001 times the length of the sortest segment of self_copy,
-                            # so the amount we push off is small compared to the length of any segment, but large
-                            # compared to the precisions of intervals (which is less than .000001 times the length
-                            # of the shortest segment). Before we do the pushoff, we need to make sure eps is small
-                            # enough so that we stay away from the other edges of pc_tri. This can be done by
-                            # considering the smallest angle min_angle of pc_tri, and ensuring that eps < x*tan(min_angle)/2,
-                            # where x in the mininal distance from p to a vertex of pc_edge.
-
-                            x = min([abs(p.cif() - pc_edge.vertex(0).point().cif()), abs(p.cif() - pc_edge.vertex(1).point().cif())])
-                            y = x*tan(min_angle)/2
-                            eps0 = eps
-                            while eps0 > y:
-                                eps0 = eps0/10
-                                prec = min([point.precision() for edge in self_copy.edges() for point in edge.points()])
-                                if eps0 < 1000*(10**(-prec*log(2,10))):
-                                    if prec < self.top_poly().max_precision():
-                                        prec = prec*2
-                                        for point in [point for edge in self_copy.edges() for point in edge.points()]:
-                                            point.set_precision(prec)
-                                    else:
-                                        raise IntervalError('max precision reached: when trying to compute combinatorial triangulation')
-                            p._set_alg(p.alg()+eps0*pc_edge_seg.unit_tangent()*QQbar(I))
-
-            alg_arcs = [[0 for i in range(self_copy.num_edges())] for j in range(pc_tri.num_edges())]
-            geom_arcs = [[0 for i in range(self_copy.num_edges())] for j in range(pc_tri.num_edges())]
-            for lifted_edge in self_copy.edges():
-                alg_intersections = []
-                for i in range(len(lifted_edge.segments())):
-                    seg = lifted_edge.segment(i)
-                    for e in pc_tri.edges():
-                        if seg.transverse_to(e.segment(0)):
-                            a,b = seg.endpoint(0).cif(), seg.endpoint(1).cif()
-                            c,d = e.segment(0).endpoint(0).cif(), e.segment(0).endpoint(1).cif()
-                            # first translate by c to get c==0
-                            a,b = a-c, b-c
-                            c,d = c-c, d-c
-
-                            # now rotate so that (c)-->--(d) has slope 1
-                            #z = exp(I*(RIF(pi)/4 - d.arg()))
-                            #a,b = a*z, b*z
-                            #d = d*z
-
-                            # if seg is parametrized by P+tv, with P=a and v=b-a, t in [0,1],
-                            v = b-a
-                            P = a
-                            # then the parameter t at the intersection point is:
-                            t = (P.imag()*d.real()-P.real()*d.imag())/(v.real()*d.imag() - v.imag()*d.real())
-                            
-                            # the algebraic intersection i(e,seg) is 1 if the z-component of (d-c) x (b-a) 
-                            # is positive, otherwise is -1
-                            alg_int = 2*int((d.real()*(b-a).imag() - (b-a).real()*d.imag()) > 0) - 1
-                            alg_intersections.append((i+t,alg_int,e.index()))
-                alg_intersections.sort(key=lambda x:x[0])
-
-                # now that the intersections are in order, we don't need the t+i parameter
-                print(lifted_edge.index(),alg_intersections)
-                alg_ints_tuples = [(tup[1],tup[2]) for tup in alg_intersections]
-
-                # now look for consecutive intersections through the same edge, and remove them recursively
-                # until all are gone (these correspond to bigons)
-                def has_bigons(alg_ints_tuples):
-                    for i in range(len(alg_ints_tuples)-1):
-                        for j in range(i+1,len(alg_ints_tuples)):
-                            if alg_ints_tuples[i][1] == alg_ints_tuples[j][1]:
-                                return True, alg_ints_tuples, (i,j)
-                    return False, alg_ints_tuples, (None,None)
-
-                # A normal arc with endpoint at a vertex v of triangle t should have its first intersection
-                # on the edge across from v. If the first intersection is with an edge that shares the vertex
-                # v, then this gives a bigon (with one vertex v, hence and end bigon). If we see this we should
-                # omit that intersection, such omission corresponds to isotoping across the bigon to remove it.
-                def has_end_bigons(alg_ints_tuples):
-                    if len(alg_ints_tuples) > 0:
-                        if lifted_edge.vertex(0).index() in vertices[alg_ints_tuples[0][1]]:
-                            return True, alg_ints_tuples, 0 
-                        elif lifted_edge.vertex(1).point() in vertices[alg_ints_tuples[-1][1]]:
-                            return True, alg_ints_tuples, -1
-                    return False, alg_ints_tuples, None
-
-                bigons, alg_ints_tuples, (i,j) = has_bigons(alg_ints_tuples)
-                while bigons:
-                    _ = alg_ints_tuples.pop(j)
-                    _ = alg_ints_tuples.pop(i)
+            # encode the edges of the postcritical triangulation as a multi-arc in this combinatorial triangulation
+            if self._is_lifted:
+                pc_tri = self._pc_triangulation
+                arcs = []
+                self_copy = deepcopy(self)
+                eps = QQbar(QQ(1)/(10**(int(-log(min([seg.length() for edge in self_copy.edges() for seg in edge.segments()]).center()/1000,10)))))
+                min_angle = self_copy.min_vertex_angle()
+                vertices = [[None,None] for i in range(pc_tri.num_edges())]
+                for pc_edge in pc_tri.edges():
+                    assert pc_edge.num_segments() == 1
+                    for i in range(2):
+                        a = pc_edge.vertex(i).point().alg()
+                        for j in range(self.num_vertices()):
+                            v = self.vertex(j)
+                            if a == v.point().alg():
+                                vertices[pc_edge.index()][i] = j
+                    pc_edge_seg = pc_edge.segment(0)
+    
+                    # first we'll make self_copy transverse to pc_edge, in such a way that every segment of self_copy
+                    # is transverse to pc_edge (i.e., no endpoint of a segment lies on pc_edge, except of course at
+                    # the vertices of pc_edge).
+    
+    
+                    for e in self_copy.edges():
+                        for i in range(len(e.points())):
+                            p = e.point(i)
+                            # if p in on pc_edge but is not at one of its vertices...
+                            if pc_edge_seg.on_seg(p) and not ( p==pc_edge.vertex(0).point() or p==pc_edge.vertex(1).point() ):
+    
+                                # push p off of pc_edge_seg to the left (relative to orientation of pc_edge_seg) by eps. By
+                                # definition eps is about .001 times the length of the sortest segment of self_copy,
+                                # so the amount we push off is small compared to the length of any segment, but large
+                                # compared to the precisions of intervals (which is less than .000001 times the length
+                                # of the shortest segment). Before we do the pushoff, we need to make sure eps is small
+                                # enough so that we stay away from the other edges of pc_tri. This can be done by
+                                # considering the smallest angle min_angle of pc_tri, and ensuring that eps < x*tan(min_angle)/2,
+                                # where x in the mininal distance from p to a vertex of pc_edge.
+    
+                                x = min([abs(p.cif() - pc_edge.vertex(0).point().cif()), abs(p.cif() - pc_edge.vertex(1).point().cif())])
+                                y = x*tan(min_angle)/2
+                                eps0 = eps
+                                while eps0 > y:
+                                    eps0 = eps0/10
+                                    prec = min([point.precision() for edge in self_copy.edges() for point in edge.points()])
+                                    if eps0 < 1000*(10**(-prec*log(2,10))):
+                                        if prec < self.top_poly().max_precision():
+                                            prec = prec*2
+                                            for point in [point for edge in self_copy.edges() for point in edge.points()]:
+                                                point.set_precision(prec)
+                                        else:
+                                            raise IntervalError('max precision reached: when trying to compute combinatorial triangulation')
+                                p._set_alg(p.alg()+eps0*pc_edge_seg.unit_tangent()*QQbar(I))
+    
+                alg_arcs = [[0 for i in range(self_copy.num_edges())] for j in range(pc_tri.num_edges())]
+                geom_arcs = [[0 for i in range(self_copy.num_edges())] for j in range(pc_tri.num_edges())]
+                for lifted_edge in self_copy.edges():
+                    alg_intersections = []
+                    for i in range(len(lifted_edge.segments())):
+                        seg = lifted_edge.segment(i)
+                        for e in pc_tri.edges():
+                            if seg.transverse_to(e.segment(0)):
+                                a,b = seg.endpoint(0).cif(), seg.endpoint(1).cif()
+                                c,d = e.segment(0).endpoint(0).cif(), e.segment(0).endpoint(1).cif()
+                                # first translate by c to get c==0
+                                a,b = a-c, b-c
+                                c,d = c-c, d-c
+    
+                                # now rotate so that (c)-->--(d) has slope 1
+                                #z = exp(I*(RIF(pi)/4 - d.arg()))
+                                #a,b = a*z, b*z
+                                #d = d*z
+    
+                                # if seg is parametrized by P+tv, with P=a and v=b-a, t in [0,1],
+                                v = b-a
+                                P = a
+                                # then the parameter t at the intersection point is:
+                                t = (P.imag()*d.real()-P.real()*d.imag())/(v.real()*d.imag() - v.imag()*d.real())
+                                
+                                # the algebraic intersection i(e,seg) is 1 if the z-component of (d-c) x (b-a) 
+                                # is positive, otherwise is -1
+                                alg_int = 2*int((d.real()*(b-a).imag() - (b-a).real()*d.imag()) > 0) - 1
+                                alg_intersections.append((i+t,alg_int,e.index()))
+                    alg_intersections.sort(key=lambda x:x[0])
+    
+                    # now that the intersections are in order, we don't need the t+i parameter
+                    alg_ints_tuples = [(tup[1],tup[2]) for tup in alg_intersections]
+    
+                    # now look for consecutive intersections through the same edge, and remove them recursively
+                    # until all are gone (these correspond to bigons)
+                    def has_bigons(alg_ints_tuples):
+                        for i in range(len(alg_ints_tuples)-1):
+                            for j in range(i+1,len(alg_ints_tuples)):
+                                if alg_ints_tuples[i][1] == alg_ints_tuples[j][1]:
+                                    return True, alg_ints_tuples, (i,j)
+                        return False, alg_ints_tuples, (None,None)
+    
+                    # A normal arc with endpoint at a vertex v of triangle t should have its first intersection
+                    # on the edge across from v. If the first intersection is with an edge that shares the vertex
+                    # v, then this gives a bigon (with one vertex v, hence and end bigon). If we see this we should
+                    # omit that intersection, such omission corresponds to isotoping across the bigon to remove it.
+                    def has_end_bigons(alg_ints_tuples):
+                        if len(alg_ints_tuples) > 0:
+                            if lifted_edge.vertex(0).index() in vertices[alg_ints_tuples[0][1]]:
+                                return True, alg_ints_tuples, 0 
+                            elif lifted_edge.vertex(1).point() in vertices[alg_ints_tuples[-1][1]]:
+                                return True, alg_ints_tuples, -1
+                        return False, alg_ints_tuples, None
+    
                     bigons, alg_ints_tuples, (i,j) = has_bigons(alg_ints_tuples)
-
-                end_bigons, alg_ints_tuples, i = has_end_bigons(alg_ints_tuples)
-                while end_bigons:
-                    _ = alg_ints_tuples.pop(i)
-                    end_bigons, alg_ints_tuples, i = has_bigons(alg_ints_tuples)
-
-                for tup in alg_ints_tuples:
-                    i = tup[1]
-                    alg_arcs[i][lifted_edge.index()] += tup[0]
-                    geom_arcs[i][lifted_edge.index()] += abs(tup[0])
-
-            arcs = []
-            for i in range(pc_tri.num_edges()):
-                alg_arc = alg_arcs[i]
-                geom_arc = geom_arcs[i]
-
-                arc = Arc(self._combinatorial, vertices[i], alg_arc, geom_arc)
-                arcs.append(arc)
-            multi_arc = MultiArc(arcs)
-
-            self._combinatorial._multi_arcs['pc_tri'] = multi_arc
+                    while bigons:
+                        _ = alg_ints_tuples.pop(j)
+                        _ = alg_ints_tuples.pop(i)
+                        bigons, alg_ints_tuples, (i,j) = has_bigons(alg_ints_tuples)
+    
+                    end_bigons, alg_ints_tuples, i = has_end_bigons(alg_ints_tuples)
+                    while end_bigons:
+                        _ = alg_ints_tuples.pop(i)
+                        end_bigons, alg_ints_tuples, i = has_bigons(alg_ints_tuples)
+    
+                    for tup in alg_ints_tuples:
+                        i = tup[1]
+                        alg_arcs[i][lifted_edge.index()] += tup[0]
+                        geom_arcs[i][lifted_edge.index()] += abs(tup[0])
+    
+                arcs = []
+                for i in range(pc_tri.num_edges()):
+                    alg_arc = alg_arcs[i]
+                    geom_arc = geom_arcs[i]
+    
+                    arc = Arc(self._combinatorial, vertices[i], alg_arc, geom_arc)
+                    arcs.append(arc)
+                multi_arc = MultiArc(arcs)
+    
+                self._combinatorial._multi_arcs['pc_tri'] = multi_arc
 
         return self._combinatorial
 

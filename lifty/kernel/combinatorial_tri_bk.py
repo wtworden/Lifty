@@ -381,9 +381,9 @@ class Arc():
     def __init__(self, Ctriangulation, vertices, algebraic_intersections, geometric_intersections, intersection_sequence=None):
         
         self._triangulation = Ctriangulation
-        self._vertices = (self._triangulation.vertex(vertices[0]), self._triangulation.vertex(vertices[1]))
-        assert self._vertices[0].is_ideal()
+        self._vertices = tuple([self._triangulation.vertex(vertices[0]), self._triangulation.vertex(vertices[1])])
         assert self._vertices[1].is_ideal()
+        assert self._vertices[0].is_ideal()
         
         if intersection_sequence != None:
             self._intersection_sequence = []
@@ -591,139 +591,8 @@ class Arc():
 
 
 class MultiArc():
-    def __init__(self, Arcs = None, triangulation = None, vertices = None, geometric = None, algebraic = None, intersection_sequences = None):
-        if Arcs:
-            self._arcs = arcs
-            self._triangulation = self._arcs[0].triangulation()
-            self._geometric = [arc.geometric() for arc in self._arcs]
-            self._algebraic = [arc.algebraic() for arc in self._arcs]
-            self._intersection_sequences = [arc.intersection_sequence() for arc in self._arcs]
-            self._vertices = tuple((arc.vertex(0),arc.vertex(1)) for arc in self._arcs)
-        else:
-            # if a list of Arcs is not given, then the Arcs must be given as a list of vertices, and a list
-            # of geometric intersection vectors or intersection sequences. 
-            self._triangulation = triangulation
-            self._vertices = tuple((self._triangulation.vertex(vertices[i][0]), self._triangulation.vertex(vertices[i][1])) for i in range(len(vertices)))
-            for i in range(len(self._vertices)):
-                for j in range(2):
-                    assert self._vertices[i][j].is_ideal()
-            if intersection_sequences == None:
-                self._geometric = geometric
-                self._intersection_sequences = None
-                self._compute_intersection_sequences()
-            else:
-                self._intersection_sequences = intersection_sequences
-                self._geometric = []
-                self._algebraic = []
-
-            self._arcs = []
-            for i in range(len(self._intersection_sequences)):
-                seq = self._intersection_sequences[i]
-                verts = [self._vertices[i][0].index(),self._vertices[i][1].index()]
-                arc = Arc(T,verts,[],[],seq)
-                self._arcs.append(arc)
-                self._geometric.append(arc.geometric())
-                self._algebraic.append(arc.algebraic())
-
-
-
-    def _compute_intersection_sequences(self):
-        vertices_unpaired = [pair[i] for pair in self._vertices for i in range(2)]
-        if sum(self._geometric) > 0:
-            T = self._triangulation
-            while len(vertices_unpaired)>0:
-                intersection_sequence = []
-                v0 = vertices_unpaired.pop()
-                arc_geom = [0 for i in range(len(T.num_edges))]
-                # first we need to find the initial edge crossed:
-                for t in T.triangles():
-                    if v0 in t.vertices():
-                        e_opp = t.opp_signed_edge(v0)
-                        e_left = t.signed_edge((t.signed_edges().index(e_opp)+1)%3)
-                        e_right = t.signed_edge((t.signed_edges().index(e_opp)+2)%3)
-                        a = self._geometric[e_opp.index()]
-                        b = self._geometric[e_left.index()]
-                        c = self._geometric[e_right.index()]
-                        # if a > b+c, then a has at least one intersection that does not meet b or c immediately
-                        # before/after. So it is either the first edge the arc intersects, or the last, or both.
-                        end_arcs = a-(b+c)
-                        if end_arcs > 0:
-                            intersection_sequence.append(e_opp)
-                            exit_edge = e_opp
-                            enter_edge = e_opp.opp_signed_edge()
-                            next_triangle = enter_edge.adjacent_triangle()
-                            position = b
-                            arc_geom[e_opp.index()] += 1
-                            break
-
-                def iterate(intersection_sequence, enter_edge, exit_edge,next_triangle,position, arc_geom):
-                    terminal_vertex = None
-                    t = next_triangle
-                    e_right = t.signed_edge((t.signed_edges().index(enter_edge)+1)%3)
-                    e_left = t.signed_edge((t.signed_edges().index(enter_edge)+2)%3)
-                    a = self._geometric[enter_edge.index()]
-                    b = self._geometric[e_left.index()]
-                    c = self._geometric[e_right.index()]
-                    exit = None
-
-                    if a + c < b:
-                        exit = 'left'
-
-                    elif a + b < c:
-                        exit = 'right'
-
-
-                    elif b + c < a:
-                        if position < b:
-                            exit = 'left'
-                        elif position >= a-c:
-                            exit = 'right'
-
-                        else:
-                            exit_edge = None
-                            terminal_vertex = t.vertex(t.edges().index(enter_edge))
-
-
-                    else:
-                        if position < (b - c +a)/2:
-                            exit = 'left'
-                        else:
-                            exit = 'right'
-
-                    if exit == 'left':
-                        intersection_sequence.append(e_left)
-                        exit_edge = e_left
-                        enter_edge = e_left.opp_signed_edge()
-                        next_triangle = enter_edge.adjacent_triangle()
-                        position = position
-                        arc_geom[exit_edge.index()] += 1
-                    elif exit == 'right':
-                        intersection_sequence.append(e_right)
-                        exit_edge = e_right
-                        enter_edge = e_right.opp_signed_edge()
-                        next_triangle = enter_edge.adjacent_triangle()
-                        position = c - a + position
-                        arc_geom[exit_edge.index()] += 1
-
-                    return intersection_sequence, enter_edge, exit_edge, next_triangle, position, terminal_vertex, arc_geom
-
-                while exit_edge != None:
-                    intersection_sequence, enter_edge, exit_edge, next_triangle, position, terminal_vertex, arc_geom = iterate(intersection_sequence, exit_edge, enter_edge, t, position, arc_geom)
-
-                arc = Arc(T, v0, terminal_vertex, [], [], intersection_sequence)
-                vertices_unpaired.remove(terminal_vertex)
-                for i in range(len(self._geometric)):
-                    self._geometric[i] -= arc_geom[i]
-                self._arcs.append(arc)
-
-        assert sum(self._geometric) == 0   #if everything worked right, we have zeroed out the geometric intersection vector.
-        self._geometric = [arc.geometric() for arc in self._arcs]
-        self._algebraic = [arc.algebraic() for arc in self._arcs]
-        self._intersection_sequences = [arc.intersection_sequence() for arc in self._arcs]
-        self._vertices = tuple((arc.vertex(0),arc.vertex(1)) for arc in self._arcs)
-
-    def _compute_algebraic_and_geometric_intersections(self):
-        pass
+    def __init__(self, arcs):
+        self._arcs = arcs
 
     def arcs(self):
         return self._arcs
